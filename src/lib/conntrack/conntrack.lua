@@ -31,7 +31,20 @@ local function dst_ip_str(p)
    return ip_str(p[30], p[31], p[32], p[33])
 end
 
+local function length(p)
+   return uint16(p[16], p[17])
+end
+
+local function protocol(p)
+   return p[23]
+end
+
 -- TCP
+
+local PROTO = {
+   TCP = 0x06,
+   UDP = 0x11
+}
 
 local function src_port(p)
    return uint16(p[34], p[35])
@@ -80,7 +93,6 @@ Conntrack = {}
 function Conntrack:new(arg)
    local o = {}
    o.conns = {}   
-   o.conn_packs = {}
    o.three_way_handshake = {}
    o._n_connections = 0
    o._n_packets = 0
@@ -106,19 +118,36 @@ local function packet_id(p, opts)
    return src.."-"..dst
 end
 
-function Conntrack:has_connection(packet)
-   local function is_registered(p)
-      local p_id = packet_id(p)
-      if self.conns[p_id] then return true end
-      p_id = packet_id(p, { dst_src = true })
-      return self.conns[p_id]
-   end
+function Conntrack:is_registered(p)
+   local p_id = packet_id(p)
+   if self.conns[p_id] then return true end
+   p_id = packet_id(p, { dst_src = true })
+   return self.conns[p_id]
+end
 
+function Conntrack:has_connection(packet)
    self._n_packets = self._n_packets + 1
 
    local p = packet.data      -- Get payload
    local p_id = packet_id(p)  -- Get packet id 
 
+   if protocol(p) == PROTO.TCP then
+      return self:has_connection_tcp(p_id, p)
+   else
+      return self:has_connection_udp(p_id, p)
+   end
+end
+
+function Conntrack:has_connection_udp(p_id, p)
+   if not self.conns[p_id] then
+      self.conns[p_id] = connection_id()
+      -- Create new connection
+      self._n_connections = self._n_connections + 1
+   end
+   return true
+end
+
+function Conntrack:has_connection_tcp(p_id, p)
    if self.three_way_handshake[p_id] then
       if is_syn_ack(p) then
          if (self.three_way_handshake[p_id] == ack(p)) then
@@ -129,12 +158,8 @@ function Conntrack:has_connection(packet)
       if is_ack(p) then
          if (self.three_way_handshake[p_id] == seq(p)) then
             -- The connection was established, create a new connection indexed by id
-            local c_id = connection_id()
-            self.conns[p_id] = c_id
-            self.conn_packs[c_id] = 0
-
+            self.conns[p_id] = connection_id()
             self._n_connections = self._n_connections + 1
-             
             self.three_way_handshake[p_id] = nil
             return false
          end
@@ -142,7 +167,7 @@ function Conntrack:has_connection(packet)
    elseif is_syn(p) then
       self.three_way_handshake[p_id] = seq(p) + 1
    else 
-      return is_registered(p)
+      return self:is_registered(p)
    end
    return false
 end
