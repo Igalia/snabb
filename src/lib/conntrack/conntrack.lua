@@ -215,6 +215,8 @@ function Conntrack:has_connection_tcp(p)
       end
       return true
    -- From CLOSED to SYN-SENT
+   elseif is_syn(p) then
+      print("syn: "..p_id)
    elseif is_syn(p) and not is_ack(p) then
       self.three_way_handshake[p_id] = seq(p) + 1
    -- From SYN-SENT to SYN-RECEIVED
@@ -222,6 +224,20 @@ function Conntrack:has_connection_tcp(p)
       p_id = packet_id(p, { dst_src = true })
       if self.three_way_handshake[p_id] == ack(p) then
          self.three_way_handshake[p_id] = seq(p) + 1
+      elseif not self.three_way_handshake[p_id] then
+         p_id = packet_id(p)
+         if self.three_way_handshake[p_id] == ack(p) then
+            self.three_way_handshake[p_id] = seq(p) + 1
+         else
+            local expected = self.three_way_handshake[p_id] or ""
+            local real = ack(p) or ""
+            -- print("p_id: "..p_id.."; real: "..real.."; expected: "..expected)
+         end
+      else
+         local expected = self.three_way_handshake[p_id] or ""
+         local real = ack(p) or ""
+         -- print("else")
+         -- print("p_id: "..p_id.."; real: "..real.."; expected: "..expected)
       end
    -- FIN-WAIT-1 or CLOSE-WAIT
    elseif is_fin(p) and is_ack(p) then
