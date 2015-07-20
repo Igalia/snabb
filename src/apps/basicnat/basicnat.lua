@@ -45,6 +45,21 @@ local function debug(...)
    print(...)
 end
 
+local function format_ip(ip)
+   local t = {}
+   if ip == nil then return "" end
+   if type(ip) == "number" then
+      for _, b in bytes(ip, 4) do
+         table.insert(t, b)
+      end
+   else
+      for i=0,3 do
+         table.insert(t, ip[i])
+      end
+   end
+   return table.concat(t, ".")
+end
+
 local function checksum_carry_and_not(csum)
    while csum > 0xffff do -- Process the carry nibbles.
       local carry = bit.rshift(csum, 16)
@@ -168,12 +183,25 @@ end
 
 --
 
+-- Format: 10.0.0.0/24
+local function parse_network_ip(ip)
+   local network, pos = ip:match("([0-9.]+)()")
+   local mask = ip:match("/([0-9]+)", pos)
+   return ip_to_uint32(network), tonumber(mask) or 32
+end
+
 function BasicNAT:new(c)
+   local network, netmask
+   if c.network then
+      network, netmask = parse_network_ip(c.network)
+   end
    local o = {
+      id = c.id,
+      netmask = netmask,
+      network = network,
+      proxy = c.proxy and ip_to_uint32(c.proxy) or nil,
       proxy_t = c.proxy_t,
-      proxy = ip_to_uint32(c.proxy),
-      public  = ip_to_uint32(c.public),
-      private = ip_to_uint32(c.private),
+      type = c.type,
    }
    return setmetatable(o, { __index = BasicNAT })
 end
@@ -189,23 +217,43 @@ end
 
 function BasicNAT:process_packet(i, o)
    local p = link.receive(i)
+   self:printp("### Received", p)
    self:rewrite(p)
    link.transmit(o, p)
 end
 
+local VMA  = ip_to_uint32("10.33.96.5")
+local VMB1 = ip_to_uint32("10.33.96.1")
+local VMB2 = ip_to_uint32("198.76.29.7")
+local VMC  = ip_to_uint32("198.76.29.4")
+
 function BasicNAT:rewrite(p)
-   if not (ethertype(p) == PROTO_ARP or ethertype(p) == PROTO_IPV4) then
-      return
+   -- TODO: Rewrite source and destination according to configuration rules
+   --[[
+   if self.id == "B2" then
+      print(("### In B2: (src: %s; dst: %s)"):format(format_ip(src_ip(p)), format_ip(dst_ip(p))))
    end
-   if dst_ip(p) == self.public then
-      src_ip(p, self:mask(src_ip(p)))
-      dst_ip(p, self.private)
+   if self.id == "B1" then
+      print(("### In B1: (src: %s; dst: %s)"):format(format_ip(src_ip(p)), format_ip(dst_ip(p))))
    end
-   -- Reply
-   if src_ip(p) == self.private then
-      src_ip(p, self.public)
-      dst_ip(p, self:unmask(dst_ip(p)))
+   if self.id == "B2" and src_ip(p) == VMB2 and dst_ip(p) == VMC then
+      print("### Outgoing packet from B2 to C")
    end
+   if self.id == "B2" and src_ip(p) == VMB2 and src_ip(p) == VMC then
+      print("### Incoming packet from C to B1")
+   end
+   if self.id == "B1" and src_ip(p) == VMB1 and dst_ip(p) == VMC then
+      print("### Outgoing packet from B1 to C")
+   end
+   if self.id == "B1" and src_ip(p) == VMB1 and src_ip(p) == VMC then
+      print("### Incoming packet from C to B1")
+   end
+   --]]
+end
+
+function BasicNAT:printp(msg, p)
+   print(("%s: port: %s (src: %s; dst: %s)"):format(msg, self.id, format_ip(src_ip(p)),
+      format_ip(dst_ip(p))))
 end
 
 function BasicNAT:mask(ip)
@@ -222,21 +270,6 @@ function BasicNAT:unmask(proxy)
 end
 
 ---
-
-local function format_ip(ip)
-   local t = {}
-   if ip == nil then return "" end
-   if type(ip) == "number" then
-      for _, b in bytes(ip, 4) do
-         table.insert(t, b)
-      end
-   else
-      for i=0,3 do
-         table.insert(t, ip[i])
-      end
-   end
-   return table.concat(t, ".")
-end
 
 local function testIPv4GetSet()
    print("Test ipv4 operations")

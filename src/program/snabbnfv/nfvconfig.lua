@@ -27,7 +27,6 @@ function load (file, pciaddr, sockpath)
 
    local ports = lib.load_conf(file)
    local c = config.new()
-
    for _,t in ipairs(ports) do
       local vlan, mac_address = t.vlan, t.mac_address
       local name = port_name(t)
@@ -90,15 +89,22 @@ function load (file, pciaddr, sockpath)
          VM_rx = RxLimit..".input"
       end
       if t.basicnat then
-         local basicnat = name.."_split"
+         local basicnat = name.."_basicnat"
          config.app(c, basicnat, BasicNAT, {
-            proxy_t = BasicNAT:get_proxy_t(),
+            id = t.basicnat.id,
+            network = t.basicnat.network,
             proxy = t.basicnat.proxy,
-            public = t.basicnat.public,
-            private = t.basicnat.private,
+            proxy_t = BasicNAT:get_proxy_t(),
+            type = t.basicnat.type,
          })
-         config.link(c, VM_tx..' -> '..basicnat..'.input')
-         VM_tx = basicnat..'.output'
+         -- Ingress
+         if t.basicnat.ingress then
+            config.link(c, basicnat..".output -> "..VM_rx)
+            VM_rx = basicnat..".input"
+         else
+            config.link(c, VM_tx..' -> '..basicnat..'.input')
+            VM_tx = basicnat..'.output'
+         end
       end
       config.link(c, NIC..".tx -> "..VM_rx)
       config.link(c, VM_tx.." -> "..NIC..".rx")
