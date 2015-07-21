@@ -5,6 +5,7 @@ local PacketFilter = require("apps.packet_filter.packet_filter").PacketFilter
 local RateLimiter = require("apps.rate_limiter.rate_limiter").RateLimiter
 local nd_light = require("apps.ipv6.nd_light").nd_light
 local L2TPv3 = require("apps.keyed_ipv6_tunnel.tunnel").SimpleKeyedTunnel
+local BasicNAT = require("apps.basicnat.basicnat").BasicNAT
 local pci = require("lib.hardware.pci")
 local ffi = require("ffi")
 local C = ffi.C
@@ -86,6 +87,16 @@ function load (file, pciaddr, sockpath)
          config.app(c, RxLimit, RateLimiter, {rate = rate, bucket_capacity = rate})
          config.link(c, RxLimit..".output -> "..VM_rx)
          VM_rx = RxLimit..".input"
+      end
+      if t.basicnat then
+         local basicnat = name.."_split"
+         config.app(c, basicnat, BasicNAT, {
+            proxy = t.basicnat.proxy,
+            public = t.basicnat.public,
+            private = t.basicnat.private,
+         })
+         config.link(c, VM_tx..' -> '..basicnat..'.input')
+         VM_tx = basicnat..'.output'
       end
       config.link(c, NIC..".tx -> "..VM_rx)
       config.link(c, VM_tx.." -> "..NIC..".rx")

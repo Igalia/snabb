@@ -1,37 +1,34 @@
-local app = require("core.app")
 local config = require("core.config")
+local app = require("core.app")
+local link = require("core.link")
+
 local pcap = require("apps.pcap.pcap")
-local basicnat = require("apps.basicnat.basicnat")
---local usage = require("program.example.replay.README_inc") -- TODO
-local usage="thisapp in.pcap out.pcap external_ip internal_net"
+local BasicNAT = require("apps.basicnat.basicnat").BasicNAT
 
-local function bytes_to_uint32(a, b, c, d)
-   return a * 2^24 + b * 2^16 + c * 2^8 + d
-end
-
-local function str_ip_to_uint32(ip)
-   local a, b, c, d = ip:match("([0-9]+).([0-9]+).([0-9]+).([0-9]+)")
-   return bytes_to_uint32(tonumber(a), tonumber(b), tonumber(c), tonumber(d))
+local function usage()
+   print("Usage: apps.basicnat.basicnat <input.pcap> <output.pcap> <public_ip> <private_ip>")
+   os.exit()
 end
 
 function run (parameters)
-   if not (#parameters == 4) then print(usage) main.exit(1) end
-   local in_pcap = parameters[1]
-   local out_pcap = parameters[2]
-   local external_ip = str_ip_to_uint32(parameters[3])
-   local internal_ip = str_ip_to_uint32(parameters[4])
+   if not (#parameters == 4) then usage() end
+   local input, output, public_ip, private_ip = unpack(parameters)
 
+   print(("Changing: DST(%s) => DST(%s); SRC(%s) => SRC(%s)"):format(
+      public_ip, private_ip, private_ip, public_ip))
    local c = config.new()
-   config.app(c, "capture", pcap.PcapReader, in_pcap)
-   config.app(c, "basicnat_app", basicnat.BasicNAT,
-                  {external_ip = external_ip, internal_ip = internal_ip})
-   config.app(c, "output_file", pcap.PcapWriter, out_pcap)
+   config.app(c, "incoming", pcap.PcapReader, input)
+   config.app(c, "basicnat", BasicNAT, {
+      public  = public_ip,
+      private = private_ip,
+   })
+   config.app(c, "outgoing", pcap.PcapWriter, output)
 
-   config.link(c, "capture.output -> basicnat_app.input")
-   config.link(c, "basicnat_app.output -> output_file.input")
+   config.link(c, "incoming.output -> basicnat.input")
+   config.link(c, "basicnat.output -> outgoing.input")
 
    app.configure(c)
-   app.main({duration=1, report = {showlinks=true}})
+   app.main({duration=1, report={showlinks = true}})
 end
 
 run(main.parameters)
