@@ -1,6 +1,7 @@
 module(..., package.seeall)
 
 local utils = require("apps.basicnat.utils")
+local ffi = require("ffi")
 
 local bytes, byte, word16 = utils.bytes, utils.byte, utils.word16
 local word32 = utils.word32
@@ -8,7 +9,26 @@ local word32 = utils.word32
 --- ### `basicnat` app: Implement http://www.ietf.org/rfc/rfc1631.txt Basic NAT.
 --- This translates one IP address to another IP address.
 --
-BasicNAT = {}
+BasicNAT = {
+   -- Lazy initializator for BasicNAT proxy table
+   get_proxy_t = (function()
+      local proxy_t
+      local function create_proxy_t()
+         ffi.cdef([[
+         typedef struct ProxyTable {
+            uint32_t proxy, ip;
+         } ProxyTable;
+         ]])
+         return ffi.new("ProxyTable")
+      end
+      return function()
+         if proxy_t == nil then
+            proxy_t = create_proxy_t()
+         end
+         return proxy_t
+      end
+   end)()
+}
 
 local ARP_HDR_SIZE   = 28
 local ETHER_HDR_SIZE = 14
@@ -150,6 +170,7 @@ end
 
 function BasicNAT:new(c)
    local o = {
+      proxy_t = c.proxy_t,
       proxy = ip_to_uint32(c.proxy),
       public  = ip_to_uint32(c.public),
       private = ip_to_uint32(c.private),
@@ -177,13 +198,27 @@ function BasicNAT:rewrite(p)
       return
    end
    if dst_ip(p) == self.public then
-      src_ip(p, self.proxy)
+      src_ip(p, self:mask(src_ip(p)))
       dst_ip(p, self.private)
    end
+   -- Reply
    if src_ip(p) == self.private then
       src_ip(p, self.public)
-      dst_ip(p, self.proxy)
+      dst_ip(p, self:unmask(dst_ip(p)))
    end
+end
+
+function BasicNAT:mask(ip)
+   self.proxy_t.ip = ip
+   self.proxy_t.proxy = self.proxy
+   return self.proxy
+end
+
+function BasicNAT:unmask(proxy)
+   if self.proxy_t.proxy == proxy then
+      return self.proxy_t.ip
+   end
+   return proxy
 end
 
 ---
