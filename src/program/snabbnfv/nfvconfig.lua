@@ -89,25 +89,31 @@ function load (file, pciaddr, sockpath)
          VM_rx = RxLimit..".input"
       end
       if t.basicnat then
-         local basicnat = name.."_basicnat"
-         config.app(c, basicnat, BasicNAT, {
-            id = t.basicnat.id,
+         local basicnat = {
+            ["in"]  = name.."_basicnat_in",
+            ["out"] = name.."_basicnat_out",
+         }
+         config.app(c, basicnat["in"], BasicNAT, {
+            public_ip = t.basicnat.public_ip,
+            private_ip = t.basicnat.private_ip,
             network = t.basicnat.network,
-            proxy = t.basicnat.proxy,
-            proxy_t = BasicNAT:get_proxy_t(),
-            type = t.basicnat.type,
          })
-         -- Ingress
-         if t.basicnat.ingress then
-            config.link(c, basicnat..".output -> "..VM_rx)
-            VM_rx = basicnat..".input"
-         else
-            config.link(c, VM_tx..' -> '..basicnat..'.input')
-            VM_tx = basicnat..'.output'
-         end
+         config.app(c, basicnat["out"], BasicNAT, {
+            public_ip = t.basicnat.public_ip,
+            private_ip = t.basicnat.private_ip,
+            network = t.basicnat.network,
+         })
+         -- Outbound packet
+         config.link(c, ("%s.tx -> %s.input"):format(Virtio, basicnat["out"]))
+         config.link(c, ("%s.output -> %s.rx"):format(basicnat["out"], NIC))
+         -- Inbound packet
+         config.link(c, ("%s.tx -> %s.input"):format(NIC, basicnat["in"]))
+         config.link(c, ("%s.output -> %s.rx"):format(basicnat["in"], Virtio))
+         goto continue
       end
       config.link(c, NIC..".tx -> "..VM_rx)
       config.link(c, VM_tx.." -> "..NIC..".rx")
+      ::continue::
    end
 
    -- Return configuration c.

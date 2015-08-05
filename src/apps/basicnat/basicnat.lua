@@ -9,26 +9,7 @@ local word32 = utils.word32
 --- ### `basicnat` app: Implement http://www.ietf.org/rfc/rfc1631.txt Basic NAT.
 --- This translates one IP address to another IP address.
 --
-BasicNAT = {
-   -- Lazy initializator for BasicNAT proxy table
-   get_proxy_t = (function()
-      local proxy_t
-      local function create_proxy_t()
-         ffi.cdef([[
-         typedef struct ProxyTable {
-            uint32_t proxy, ip;
-         } ProxyTable;
-         ]])
-         return ffi.new("ProxyTable")
-      end
-      return function()
-         if proxy_t == nil then
-            proxy_t = create_proxy_t()
-         end
-         return proxy_t
-      end
-   end)()
-}
+BasicNAT = {}
 
 local ARP_HDR_SIZE   = 28
 local ETHER_HDR_SIZE = 14
@@ -181,8 +162,6 @@ local function ip_to_uint32(ip)
    return to_uint32(unpack(t))
 end
 
---
-
 -- Format: 10.0.0.0/24
 local function parse_network_ip(ip)
    local network, pos = ip:match("([0-9.]+)()")
@@ -190,18 +169,18 @@ local function parse_network_ip(ip)
    return ip_to_uint32(network), tonumber(mask) or 32
 end
 
+--
+
 function BasicNAT:new(c)
-   local network, netmask
+   local network, len
    if c.network then
-      network, netmask = parse_network_ip(c.network)
+      network, len = parse_network_ip(c.network)
    end
    local o = {
-      id = c.id,
-      netmask = netmask,
+      public_ip = ip_to_uint32(c.public_ip),
+      private_ip = ip_to_uint32(c.private_ip),
+      netmask = bit.bswap(2^len - 1),
       network = network,
-      proxy = c.proxy and ip_to_uint32(c.proxy) or nil,
-      proxy_t = c.proxy_t,
-      type = c.type,
    }
    return setmetatable(o, { __index = BasicNAT })
 end
@@ -217,56 +196,41 @@ end
 
 function BasicNAT:process_packet(i, o)
    local p = link.receive(i)
-   self:printp("### Received", p)
    self:rewrite(p)
    link.transmit(o, p)
 end
 
-local VMA  = ip_to_uint32("10.33.96.5")
-local VMB1 = ip_to_uint32("10.33.96.1")
-local VMB2 = ip_to_uint32("198.76.29.7")
-local VMC  = ip_to_uint32("198.76.29.4")
-
 function BasicNAT:rewrite(p)
-   -- TODO: Rewrite source and destination according to configuration rules
-   --[[
-   if self.id == "B2" then
-      print(("### In B2: (src: %s; dst: %s)"):format(format_ip(src_ip(p)), format_ip(dst_ip(p))))
+   -- Only attempt to alter ipv4 packets. Assume an Ethernet encapsulation.
+   if p.data[12] ~= 8 or p.data[13] ~= 0 then return p end
+   local ip = {
+      src = src_ip(p),
+      dst = dst_ip(p),
+   }
+   if self:is_private_network(ip.src) and self:is_public_network(ip.dst) then
+      src_ip(p, self:mask(ip.src))
    end
-   if self.id == "B1" then
-      print(("### In B1: (src: %s; dst: %s)"):format(format_ip(src_ip(p)), format_ip(dst_ip(p))))
+   if ip.dst == self.public_ip and self:is_public_network(ip.src) then
+      dst_ip(p, self:unmask(ip.dst))
    end
-   if self.id == "B2" and src_ip(p) == VMB2 and dst_ip(p) == VMC then
-      print("### Outgoing packet from B2 to C")
-   end
-   if self.id == "B2" and src_ip(p) == VMB2 and src_ip(p) == VMC then
-      print("### Incoming packet from C to B1")
-   end
-   if self.id == "B1" and src_ip(p) == VMB1 and dst_ip(p) == VMC then
-      print("### Outgoing packet from B1 to C")
-   end
-   if self.id == "B1" and src_ip(p) == VMB1 and src_ip(p) == VMC then
-      print("### Incoming packet from C to B1")
-   end
-   --]]
 end
 
-function BasicNAT:printp(msg, p)
-   print(("%s: port: %s (src: %s; dst: %s)"):format(msg, self.id, format_ip(src_ip(p)),
-      format_ip(dst_ip(p))))
+function BasicNAT:is_private_network(ip)
+   return bit.band(ip, self.netmask) == bit.tobit(self.network)
 end
 
-function BasicNAT:mask(ip)
-   self.proxy_t.ip = ip
-   self.proxy_t.proxy = self.proxy
-   return self.proxy
+function BasicNAT:is_public_network(ip)
+   return not self:is_private_network(ip)
 end
 
-function BasicNAT:unmask(proxy)
-   if self.proxy_t.proxy == proxy then
-      return self.proxy_t.ip
-   end
-   return proxy
+-- TODO: Save private_ip in a store and return public address
+function BasicNAT:mask(private_ip)
+   return self.public_ip
+end
+
+-- TODO: Retrieve private address from a store
+function BasicNAT:unmask(ip)
+   return self.private_ip
 end
 
 ---

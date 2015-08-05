@@ -19,7 +19,7 @@ end
 -- Iterator of a value into its bytes.
 -- For instance, 'bytes(val, 4)' divides 'val' into 4 bytes.
 function bytes(val, n)
-   assert(n and n % 2 == 0 and n <= 4)
+   assert(n and n % 2 == 0 and n <= 4, "number of bytes is nil or an odd number")
 
    -- Decompose val in n bytes
    local t = {}
