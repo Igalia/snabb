@@ -6,21 +6,30 @@ local pcap = require("apps.pcap.pcap")
 local BasicNAT = require("apps.basicnat.basicnat").BasicNAT
 
 local function usage()
-   print("Usage: apps.basicnat.basicnat <input.pcap> <output.pcap> <public_ip> <private_ip>")
+   print([[
+Usage: apps.basicnat.basicnat <input.pcap> <output.pcap> <public_ip> <private_ip> <private_network>
+
+   <input.pcap>      Input file
+   <output.pcap>     Output file
+   <public_ip>       Public IP used as source address in outbound packets
+   <private_ip>      Private IP used as destination address in inbound packtes
+   <private_network> Private network address in CIDR format, i.e: 10.0.0.0./8
+]])
    os.exit()
 end
 
 function run (parameters)
-   if not (#parameters == 4) then usage() end
-   local input, output, public_ip, private_ip = unpack(parameters)
+   if not (#parameters == 5) then usage() end
+   local input, output, public_ip, private_ip, network = unpack(parameters)
 
-   print(("Changing: DST(%s) => DST(%s); SRC(%s) => SRC(%s)"):format(
-      public_ip, private_ip, private_ip, public_ip))
+   print(("Changing: SRC(%s) => SRC(%s)"):format(private_ip, public_ip))
+   print(("Changing: DST(%s) => DST(%s)"):format(public_ip, private_ip))
    local c = config.new()
    config.app(c, "incoming", pcap.PcapReader, input)
    config.app(c, "basicnat", BasicNAT, {
-      public  = public_ip,
-      private = private_ip,
+      public_ip  = public_ip,
+      private_ip = private_ip,
+      network = network,
    })
    config.app(c, "outgoing", pcap.PcapWriter, output)
 
