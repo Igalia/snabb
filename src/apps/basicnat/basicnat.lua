@@ -1,150 +1,289 @@
 module(..., package.seeall)
 
-local bit = require("bit")
+local utils = require("apps.basicnat.utils")
+local ffi = require("ffi")
 
---- ### `basicnat` app: Implement http://www.ietf.org/rfc/rfc1631.txt Basic NAT
---- This translates one IP address to another IP address
+local bytes, byte, word16 = utils.bytes, utils.byte, utils.word16
+local word32 = utils.word32
 
+--- ### `basicnat` app: Implement http://www.ietf.org/rfc/rfc1631.txt Basic NAT.
+--- This translates one IP address to another IP address.
+--
 BasicNAT = {}
 
-function BasicNAT:new (conf)
-   local c = {external_ip = conf.external_ip, internal_ip = conf.internal_ip}
-   return setmetatable(c, {__index=BasicNAT})
+local ARP_HDR_SIZE   = 28
+local ETHER_HDR_SIZE = 14
+local IPV4_HDR_SIZE  = 20
+local TRANSPORT_BASE = 34  -- Tranport layer (TCP/UDP/etc) header start.
+
+local PROTO_ARP     = 0x806
+local PROTO_IPV4    = 0x800
+local PROTO_TCP     = 6
+local PROTO_UDP     = 17
+
+local function debug(...)
+   io.write("### DEBUG: ")
+   print(...)
 end
 
-local function bytes_to_uint32(a, b, c, d)
-   return a * 2^24 + b * 2^16 + c * 2^8 + d
-end
-
-local ipv4_base = 14 -- Ethernet encapsulated ipv4
-local transport_base = 34 -- tranport layer (TCP/UDP/etc) header start
-local proto_tcp = 6
-local proto_udp = 17
-
-local function uint32_to_bytes(u)
-   local a = bit.rshift(u, 24)
-   local b = bit.band(bit.rshift(u, 16), 0xff)
-   local c = bit.band(bit.rshift(u, 8), 0xff)
-   local d = bit.band(u, 0xff)
-   return a, b, c, d
-end
-
-local function get_src_ip(pkt)
-   local d = pkt.data
-   return bytes_to_uint32(d[26], d[27], d[28], d[29])
-end
-
-local function get_dst_ip(pkt)
-   local d = pkt.data
-   return bytes_to_uint32(d[30], d[31], d[32], d[33])
-end
-
-local function csum_carry_and_not(checksum)
-   while checksum > 0xffff do -- process the carry nibbles
-      local carry = bit.rshift(checksum, 16)
-      checksum = bit.band(checksum, 0xffff) + carry
-   end
-   return bit.band(bit.bnot(checksum), 0xffff)
-end
-
-local function ipv4_checksum(pkt)
-   local checksum = 0
-   for i = ipv4_base, ipv4_base + 18, 2 do
-      if i ~= ipv4_base + 10 then -- The checksum bytes are assumed to be 0
-         checksum = checksum + pkt.data[i] * 0x100 + pkt.data[i+1]
+local function format_ip(ip)
+   local t = {}
+   if ip == nil then return "" end
+   if type(ip) == "number" then
+      for _, b in bytes(ip, 4) do
+         table.insert(t, b)
+      end
+   else
+      for i=0,3 do
+         table.insert(t, ip[i])
       end
    end
-   return csum_carry_and_not(checksum)
+   return table.concat(t, ".")
+end
+
+local function checksum_carry_and_not(csum)
+   while csum > 0xffff do -- Process the carry nibbles.
+      local carry = bit.rshift(csum, 16)
+      csum = bit.band(csum, 0xffff) + carry
+   end
+   return bit.band(bit.bnot(csum), 0xffff)
+end
+
+-- https://en.wikipedia.org/wiki/IPv4_header_checksum.
+local function calculate_checksum(p, offset)
+   local offset = offset or ETHER_HDR_SIZE
+   local checksum = 0
+   for i = offset, offset + 18, 2 do
+      if i ~= offset + 10 then -- The checksum bytes are assumed to be 0.
+         checksum = checksum + p.data[i] * 0x100 + p.data[i+1]
+      end
+   end
+   return checksum_carry_and_not(checksum)
+end
+
+local function checksum(p, val)
+   local offset = ETHER_HDR_SIZE + 10
+   return word16(p, offset, val)
+end
+
+local function ethertype(p)
+   return word16(p, ETHER_HDR_SIZE - 2)
+end
+
+local function ip_proto(p)
+   if ethertype(p) == PROTO_IPV4 then
+      return byte(p, ETHER_HDR_SIZE + 9)
+   end
+end
+
+local function tcplen(p)
+   return word16(p, ETHER_HDR_SIZE + 2) - 20
 end
 
 local function transport_checksum(pkt)
-   local checksum = 0
-   -- First 64 bytes of the TCP pseudo-header: the ip addresses
-   for i = ipv4_base + 12, ipv4_base + 18, 2 do
-      checksum = checksum + pkt.data[i] * 0x100 + pkt.data[i+1]
+   local csum = 0
+   -- First 64 bytes of the TCP pseudo-header: the ip addresses.
+   for i = ETHER_HDR_SIZE + 12, ETHER_HDR_SIZE + 18, 2 do
+      csum = csum + word16(pkt, i)
    end
-   -- Add the protocol field of the IPv4 header to the checksum
-   local protocol = pkt.data[ipv4_base + 9]
-   checksum = checksum + protocol
-   local tcplen = pkt.data[ipv4_base + 2] * 0x100 + pkt.data[ipv4_base + 3] - 20
-   checksum = checksum + tcplen -- end of pseudo-header
+   -- Add the protocol field of the IPv4 header to the csum.
+   csum = csum + ip_proto(pkt)
+   local tcplen = tcplen(p)
+   csum = csum + tcplen -- End of pseudo-header.
 
-   for i = transport_base, transport_base + tcplen - 2, 2 do
-      if i ~= transport_base + 16 then -- The checksum bytes are zero
-         checksum = checksum + pkt.data[i] * 0x100 + pkt.data[i+1]
+   for i = TRANSPORT_BASE, TRANSPORT_BASE + tcplen - 2, 2 do
+      if i ~= TRANSPORT_BASE + 16 then -- The csum bytes are zero.
+         csum = csum + word16(pkt, i)
       end
    end
    if tcplen % 2 == 1 then
-      checksum = checksum + pkt.data[transport_base + tcplen - 1]
+      csum = csum + byte(pkt, TRANSPORT_BASE + tcplen - 1)
    end
-   return csum_carry_and_not(checksum)
+   return checksum_carry_and_not(csum)
 end
 
-local function fix_checksums(pkt)
-   local ipchecksum = ipv4_checksum(pkt)
-   pkt.data[ipv4_base + 10] = bit.rshift(ipchecksum, 8)
-   pkt.data[ipv4_base + 11] = bit.band(ipchecksum, 0xff)
-   local transport_proto = pkt.data[ipv4_base + 9]
-   if transport_proto == proto_tcp then
-      local transport_csum = transport_checksum(pkt)
-      pkt.data[transport_base + 16] = bit.rshift(transport_csum, 8)
-      pkt.data[transport_base + 17] = bit.band(transport_csum, 0xff)
+local function refresh_checksum(p)
+   checksum(p, calculate_checksum(p))
+   local proto = ip_proto(p)
+   if proto == PROTO_TCP then
+      word16(p, TRANSPORT_BASE + 16, transport_checksum(p))
       return true
-   elseif transport_proto == proto_udp then
-      -- ipv4 udp checksums are optional
-      pkt.data[transport_base + 6] = 0
-      pkt.data[transport_base + 7] = 0
+   end
+   if proto == PROTO_UDP then
+      -- IPv4 UDP checksums are optional.
+      word16(p, TRANSPORT_BASE + 6, 0)
       return true
-   else
-      return false -- didn't attempt to change a transport-layer checksum
+   end
+   -- Didn't attempt to change a transport-layer checksum.
+   return false
+end
+
+local function src_ip(p, val)
+   if ethertype(p) == PROTO_ARP then
+      local offset = ETHER_HDR_SIZE + ARP_HDR_SIZE - 14
+      return word32(p, offset, val)
+   end
+   if ethertype(p) == PROTO_IPV4 then
+      local offset = ETHER_HDR_SIZE + IPV4_HDR_SIZE - 8
+      local result = word32(p, offset, val)
+      if val then
+         refresh_checksum(p)
+      end
+      return result
    end
 end
 
--- TODO: fix the checksum
-local function set_src_ip(pkt, ip)
-   local a, b, c, d = uint32_to_bytes(ip)
-   pkt.data[ipv4_base + 12] = a
-   pkt.data[ipv4_base + 13] = b
-   pkt.data[ipv4_base + 14] = c
-   pkt.data[ipv4_base + 15] = d
-   return pkt
-end
-
--- TODO: fix the checksum
-local function set_dst_ip(pkt, ip)
-   local a, b, c, d = uint32_to_bytes(ip)
-   pkt.data[ipv4_base + 16] = a
-   pkt.data[ipv4_base + 17] = b
-   pkt.data[ipv4_base + 18] = c
-   pkt.data[ipv4_base + 19] = d
-   return pkt
-end
-
--- For packets outbound from the
--- private IP, the source IP address and related fields such as IP,
--- TCP, UDP and ICMP header checksums are translated. For inbound
--- packets, the destination IP address and the checksums as listed above
--- are translated.
-local function basic_rewrite(pkt, external_ip, internal_ip, mask)
-   -- Only attempt to alter ipv4 packets. Assume an Ethernet encapsulation.
-   if pkt.data[12] ~= 8 or pkt.data[13] ~= 0 then return pkt end
-   local src_ip, dst_ip = get_src_ip(pkt), get_dst_ip(pkt)
-   if src_ip == external_ip then
-      set_src_ip(pkt, internal_ip)
+local function dst_ip(p, val)
+   if ethertype(p) == PROTO_ARP then
+      local offset = ETHER_HDR_SIZE + ARP_HDR_SIZE - 4
+      return word32(p, offset, val)
    end
-   if dst_ip == internal_ip then
-      set_dst_ip(pkt, external_ip)
+   if ethertype(p) == PROTO_IPV4 then
+      local offset = ETHER_HDR_SIZE + IPV4_HDR_SIZE - 4
+      local result = word32(p, offset, val)
+      if val then
+         refresh_checksum(p)
+      end
+      return result
    end
-   fix_checksums(pkt)
-   return pkt
 end
 
-function BasicNAT:push ()
-   local i, o = self.input.input, self.output.output
+local function to_uint32(a, b, c, d)
+   return a * 2^24 + b * 2^16 + c * 2^8 + d
+end
+
+local function ip_to_uint32(ip)
+   local t = {}
+   for each in ip:gmatch("(%d+)") do
+      each = tonumber(each)
+      assert(each >= 0 and each <= 255)
+      table.insert(t, each)
+   end
+   return to_uint32(unpack(t))
+end
+
+-- Format: 10.0.0.0/24
+local function parse_network_ip(ip)
+   local network, pos = ip:match("([0-9.]+)()")
+   local mask = ip:match("/([0-9]+)", pos)
+   return ip_to_uint32(network), tonumber(mask) or 32
+end
+
+--
+
+function BasicNAT:new(c)
+   local network, len
+   if c.network then
+      network, len = parse_network_ip(c.network)
+   end
+   local o = {
+      public_ip = ip_to_uint32(c.public_ip),
+      private_ip = ip_to_uint32(c.private_ip),
+      netmask = bit.bswap(2^len - 1),
+      network = network,
+   }
+   return setmetatable(o, { __index = BasicNAT })
+end
+
+function BasicNAT:push(p)
+   local i = assert(self.input.input, "input port not found")
+   local o = assert(self.output.output, "output port not found")
 
    while not link.empty(i) and not link.full(o) do
-      local pkt = link.receive(i)
-      local natted_pkt = basic_rewrite(pkt, self.external_ip, self.internal_ip)
-      link.transmit(o, natted_pkt)
+      self:process_packet(i, o)
    end
+end
+
+function BasicNAT:process_packet(i, o)
+   local p = link.receive(i)
+   self:rewrite(p)
+   link.transmit(o, p)
+end
+
+function BasicNAT:rewrite(p)
+   -- Only attempt to alter ipv4 packets. Assume an Ethernet encapsulation.
+   if p.data[12] ~= 8 or p.data[13] ~= 0 then return p end
+   local ip = {
+      src = src_ip(p),
+      dst = dst_ip(p),
+   }
+   if self:is_private_network(ip.src) and self:is_public_network(ip.dst) then
+      src_ip(p, self:mask(ip.src))
+   end
+   if ip.dst == self.public_ip and self:is_public_network(ip.src) then
+      dst_ip(p, self:unmask(ip.dst))
+   end
+end
+
+function BasicNAT:is_private_network(ip)
+   return bit.band(ip, self.netmask) == bit.tobit(self.network)
+end
+
+function BasicNAT:is_public_network(ip)
+   return not self:is_private_network(ip)
+end
+
+-- TODO: Save private_ip in a store and return public address
+function BasicNAT:mask(private_ip)
+   return self.public_ip
+end
+
+-- TODO: Retrieve private address from a store
+function BasicNAT:unmask(ip)
+   return self.private_ip
+end
+
+---
+
+local function testIPv4GetSet()
+   print("Test ipv4 operations")
+   local p = {
+      data = ffi.new("uint8_t[?]", 4)
+   }
+   for i=0,3 do
+      if i % 2 == 1 then
+         p.data[i] = 0xff
+      else
+         p.data[i] = 0
+      end
+   end
+
+   -- Prints 0.255.0.255
+   assert("0.255.0.255" == format_ip(p.data), "Wrong format_ip")
+   print(("0.255.0.255 == %s"):format(format_ip(p.data)))
+
+   local ip = 0xFF996633
+   word32(p, 0, ip)
+   ip = word32(p, 0)
+   -- Prints 255.153.102.51
+   assert("255.153.102.51" == format_ip(ip))
+   print(("255.153.102.51 == %s"):format(format_ip(ip)))
+
+   -- Prints 65535
+   local ip = 65535
+   assert(ip == ip_to_uint32("0.0.255.255"), "Wrong ip_to_uint32")
+   print(("%d == %d"):format(ip, ip_to_uint32("0.0.255.255")))
+
+   print("---")
+end
+
+local function testChecksum()
+   print("Test checksum")
+   local header = { 0x45, 0x00, 0x00, 0x73, 0x00, 0x00, 0x40, 0x00,
+      0x40, 0x11, 0xb8, 0x61, 0xc0, 0xa8, 0x00, 0x01, 0xc0, 0xa8, 0x00, 0xc7 }
+   local p = {
+      data = ffi.new("uint8_t[?]", 20)
+   }
+   for i, byte in ipairs(header) do
+      p.data[i-1] = byte
+   end
+   assert(calculate_checksum(p, 0) == 0xb861)
+   print(("Checksum: 0x%x"):format(calculate_checksum(p, 0)))
+   print("---")
+end
+
+function selftest()
+   testIPv4GetSet()
+   testChecksum()
+   print("OK")
 end
