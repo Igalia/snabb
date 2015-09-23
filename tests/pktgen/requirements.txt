@@ -1,0 +1,2 @@
+hipack>=9
+scapy>=2.3.0

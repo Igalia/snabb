@@ -1,0 +1,19 @@
+# Generates a simple unidirectional flow of packets known as "Internet Mix"
+# (see https://en.wikipedia.org/wiki/Internet_Mix), with packets of three
+# different sizes which can occur in the stream with an associated probability.
+tcp {
+	.sport 80      # Traffic from an HTTP server
+	.dport 10202   # To a random port in a client machine
+	.seq "random"  # Random sequence number.
+	.flags ""      # No flags, meaning no SYN/FIN/ACK: implies that the
+	               # packets are part of a previously established connection
+
+	# Defines three different possible sizes of the payloads, to be chosen
+	# from using an uniform distribution with the given probabilities. Here
+	# the probabilities are given in the [0.0, 1.0] range.
+	pdist [
+		{ .probability 0.583, randbytes { .size 40 } }
+		{ .probability 0.333, randbytes { .size 576 } }
+		{ .probability 0.084, randbytes { .size 1500 } }
+	]
+}

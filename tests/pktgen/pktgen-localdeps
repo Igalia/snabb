@@ -1,0 +1,31 @@
+#! /bin/sh
+#
+# localinstall.sh
+# Copyright (C) 2015 Adrian Perez <aperez@igalia.com>
+#
+# Distributed under terms of the MIT license.
+#
+set -e
+
+# Those can be overriden by environment variables
+: ${PYTHON:=python2}
+: ${VIRTUALENV:=virtualenv}
+PYTHON=$(which "${PYTHON}")
+
+# Obtain the absolute path to the directory containing this script
+mydir=$(dirname "$0")
+pushd "${mydir}" &> /dev/null
+mydir=$(pwd)
+popd &> /dev/null
+
+# Create the virtualenv only if it does not already exist
+envdir="${mydir}/.env"
+if [[ ! -d ${envdir} || ! -x ${envdir}/bin/python ]] ; then
+	${VIRTUALENV} -p "${PYTHON}" "${envdir}"
+fi
+
+# Always run "pip install to ensure that the dependencies are up-to-date
+"${envdir}/bin/pip" -q install -r "${mydir}/requirements.txt"
+
+exec "${envdir}/bin/python" "${mydir}/pktgen" "$@"
+

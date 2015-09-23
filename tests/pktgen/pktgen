@@ -1,0 +1,382 @@
+#! /usr/bin/env python2
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+#
+# Copyright © 2015 Adrian Perez <aperez@igalia.com>
+#
+# Distributed under terms of the MIT license.
+
+from six import print_, iteritems, text_type, string_types
+from six.moves import range
+from scapy.layers import inet, inet6
+from scapy.utils import PcapWriter
+from scapy import packet
+from itertools import islice, count
+import logging
+import random
+import hipack
+
+# FIXME: Ugh, a global.
+main_spec_file_path = None
+
+
+def seq_randint(a, b):
+    """Yields a sequence of random integers.
+    """
+    while True:
+        yield random.randint(a, b)
+
+TCP_SEQ_GENERATORS = {
+    "random": lambda: seq_randint(0, 16386),
+    "increasing": count,
+}
+
+
+def src_raw(data):
+    """Generates fixed data.
+
+    Spec-file syntax::
+
+        raw {
+            .data "This: \\00 is a null byte, with an hex escape"
+        }
+
+    :param data: Raw data contents, as a `str` or a `bytearray`.
+    """
+    while True:
+        yield packet.Raw(data)
+
+
+def src_randbytes(size, deviation=0):
+    """Generates a stream of random bytes.
+
+    Optionally, if the `deviation` is non-zero, sequences of bytes of random
+    sizes are generated, where the sizes follow a Gaussian distribution: `size`
+    determines the average amount of bytes, with `deviation` being the standard
+    deviation. Note that in general it is a bad idea to use a deviation biger
+    than the average size, because the Gaussian distribution will produce a
+    certain amount of negative sizes, which will be rounded up to zero and
+    accompanied by a warning.
+
+    Spec-file syntax::
+
+        randbytes {
+            .size 550
+            .deviation 25  # Defaults to zero if omitted
+        }
+
+    :param size: Amount of random bytes to generate.
+    :param deviation: Standard deviation of the byte sequence type.
+    """
+    while True:
+        s = int(random.gauss(size, deviation))
+        if s < 0:
+            logging.warn("randbytes: negative packet size value, "
+                    "clipped to zero (deviation may be bigger than "
+                    "average size)")
+        yield packet.Raw(str(bytearray(random.getrandbits(8) for _ in range(s))))
+
+
+def src_spec_file(name, path=None):
+    """Include the specification of a packet generator from another file.
+
+    Spec-file syntax::
+
+        spec-file {
+            .name "imix-simple"  # Note the lack of
+            .path "../includes"
+        }
+
+    :param name: Name of the file to include, sans the ``.pktinc`` suffix.
+    :param path: Lookup the file in a different path.
+    """
+    from os.path import dirname, join
+    if path is None:
+        global main_spec_file_path
+        path = dirname(main_spec_file_path)
+    path = join(path, name + ".pktinc")
+    logging.info(u"Spec: \"%s\" (included)", path)
+    return Spec.from_file(path).payload.instantiate()
+
+
+SOURCES = {
+    "spec-file": src_spec_file,
+    "randbytes": src_randbytes,
+    "raw"      : src_raw,
+}
+
+
+# Ugh.
+def _asciify_kw_for_scapy(kw):
+    for key, value in iteritems(kw):
+        if isinstance(value, text_type):
+            kw[key] = value.encode("ascii")
+
+
+def mod_ip4(payload, **kw):
+    """Encapsulates a payload into an IPv4 packet."""
+    _asciify_kw_for_scapy(kw)
+    return ((inet.IP(**kw) / p) for p in payload)
+
+def mod_ip6(payload, **kw):
+    """Encapsulates a payload into an IPv6 packet."""
+    _asciify_kw_for_scapy(kw)
+    return ((inet6.IPv6(**kw) / p) for p in payload)
+
+def mod_tcp(payload, **kw):
+    """Encapsulates a payload into a TCP packet."""
+    _asciify_kw_for_scapy(kw)
+    if "seq" in kw and isinstance(kw["seq"], string_types):
+        try:
+            seq = TCP_SEQ_GENERATORS[kw["seq"]]()
+        except KeyError:
+            raise SpecSemanticError(
+                    u"No such TCP sequence number generator: {!r}"
+                        .format(kw["seq"]))
+        del kw["seq"]
+        return ((inet.TCP(seq=seq.next(), **kw) / p) for p in payload)
+    else:
+        return ((inet.TCP(**kw) / p) for p in payload)
+
+def mod_tcpip_ack(payload, **kw):
+    did_warn_non_tcpip = False
+    _asciify_kw_for_scapy(kw)
+    for p in payload:
+        yield p
+
+        if not (p.haslayer(inet.TCP) and (p.haslayer(inet6.IPv6)
+                or p.haslayer(inet.IP))):
+            if not did_warn_non_tcpip:
+                logging.warn(u"Requested generating an ACK for a non TCP/IP"
+                    u" packet (this will be reported only once)")
+                p.show()
+                did_warn_non_tcpip = True
+            continue
+
+        # Operate on a copy, which gets transmutated into an ACK
+        p = p.copy()
+        p.src, p.dst = p.dst, p.src        # Swap addresses
+        p[inet.TCP].ack = p[inet.TCP].seq  # ACK previous packet
+        p[inet.TCP].flags = "A"            # Set ACK flag
+        p[packet.Raw].load = ""            # No payload
+        yield p
+
+
+def mod_pdist(choices):
+    """Picks items from a set of choices with associated probabilities.
+
+    The following example (in spec-file syntax), picks elements with content
+    ``"B"`` with the double of probabilty than elements with content ``"A"``::
+
+        pdist [
+            { .probability 1, raw { .data "A" } }
+            { .probability 2, raw { .data "B" } }
+        }
+    """
+    items = []
+    max_p = 0.0
+    for (conf, payload) in choices:
+        max_p += conf["probability"]
+        items.append((max_p, payload))
+    while True:
+        cur_p = random.uniform(0.0, max_p)
+        for (p, choice) in items:
+            if cur_p < p:
+                yield choice.next()
+                break  # breaks only the for-loop
+
+
+MODIFIERS = {
+    "ip"        : mod_ip4,
+    "ip4"       : mod_ip4,
+    "ipv4"      : mod_ip4,
+    "ip6"       : mod_ip6,
+    "ipv6"      : mod_ip6,
+    "tcp"       : mod_tcp,
+    "tcpip-ack" : mod_tcpip_ack,
+    "pdist"     : mod_pdist,
+}
+
+
+def sink_pcap(packets, path, count=1):
+    """Writes packets to a file in the ``tcpdump`` packet capture format.
+
+    :param packets: Iterable of Scapy packets.
+    :param path: Path to the file to write to.
+    :param count: Number of packets to write.
+
+    .. todo:: Move `count` to a separate filter-like generator/modifier which
+              limits the amount of packets that pass to a sink.
+    """
+    with PcapWriter(path) as pcap:
+        for packet in islice(packets, 0, count):
+            pcap.write(packet)
+
+SINKS = {
+    "pcap": sink_pcap,
+}
+
+
+class SpecError(Exception):
+    prefix = u"spec error"
+    def __init__(self, message=None):
+        if message is None:
+            message = self.prefix
+        else:
+            message = u"{} ({})".format(self.prefix, message)
+        super(SpecError, self).__init__(message)
+
+class SpecSemanticError(SpecError):
+    prefix = "invalid spec"
+
+class SpecInstantiationError(SpecError):
+    prefix = "cannot instantiate spec"
+    def __init__(self, spec, message=None):
+        self.spec = spec
+        super(SpecInstantiationError, self).__init__(message)
+
+
+class Spec(object):
+    @classmethod
+    def from_stream(cls, stream):
+        return cls(hipack.load(stream))
+
+    @classmethod
+    def from_file(cls, path):
+        with open(path, "rb") as stream:
+            return cls.from_stream(stream)
+
+    @classmethod
+    def from_string(cls, string):
+        return cls(hipack.loads(string))
+
+    def __init__(self, data, name=None):
+        self.__payload = None
+        self.__name = name
+        self.__config = {}
+        if isinstance(data, list):
+            self.__payload = map(Spec, data)
+        else:
+            for key, value in iteritems(data):
+                if key.startswith("."):
+                    self.__config[str(key[1:])] = value
+                elif self.__payload is not None:
+                    raise SpecError("More than a single payload source")
+                else:
+                    self.__payload = Spec(value, name=str(key))
+        if self.get_source_spec() is None:
+            raise SpecError("No packet sources")
+
+    def __getattr__(self, name):
+        return self.__config[name]
+
+    @property
+    def name(self):
+        """Name of the block"""
+        return self.__name
+
+    @property
+    def payload(self):
+        return self.__payload
+
+    @property
+    def has_payload(self):
+        return self.payload is not None
+
+    @property
+    def is_source(self):
+        return not self.has_payload and self.name in SOURCES
+
+    @property
+    def is_sink(self):
+        return self.has_payload and self.name in SINKS
+
+    @property
+    def is_modifier(self):
+        return self.has_payload and self.name in MODIFIERS
+
+    def get_source_spec(self):
+        if self.is_source:
+            return self
+        elif self.has_payload:
+            if isinstance(self.payload, list):
+                source = map(self.__class__.get_source_spec, self.payload)
+                return source if len(source) else None
+            else:
+                assert isinstance(self.payload, Spec)
+                return self.payload.get_source_spec()
+        else:
+            return None
+
+    def __repr__(self):
+        items = ", ".join((u"{}={!r}".format(key, value)
+                for (key, value) in iteritems(self.__config)))
+        if len(items):
+            items = u"({})".format(items)
+        payload = u" / {!r}".format(self.payload) if self.has_payload else ""
+        name = "<=" if self.__name is None else self.__name
+        return u"{}{}{}".format(name, items, payload)
+
+    def instantiate(self):
+        result = None
+        if self.is_sink:
+            raise SpecInstantiationError("sink in spec")
+        elif self.is_source:
+            assert self.name is not None
+            factory = SOURCES[self.name]
+            return factory(**self.__config)
+        elif self.is_modifier:
+            assert self.name is not None
+            factory = MODIFIERS[self.name]
+            if isinstance(self.payload, list):
+                payload = map(lambda spec: spec.instantiate(), self.payload)
+            else:
+                payload = self.payload.instantiate()
+            return factory(payload, **self.__config)
+        else:
+            return (dict(self.__config), self.payload.instantiate())
+
+
+import argparse
+cli = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Generate a pcap file from a packet stream definition")
+cli.add_argument("-c", "--count", type=int, default=1,
+        help="Number of packets to generate")
+cli.add_argument("--log-level", type=str, default="WARN", dest="loglevel",
+        help="Logging level")
+cli.add_argument("--random-seed", type=long,
+        dest="randomseed", metavar="SEED", default=None,
+        help="Initialize the random number generator with the given SEED")
+cli.add_argument("pcapfile", help="Path to output pcap file")
+cli.add_argument("specfile", help="Path to input packet specification",
+        type=argparse.FileType("rb"))
+
+LOGLEVELS = ("DEBUG", "INFO", "WARN", "ERROR", "FATAL")
+
+if __name__ == "__main__":
+    args = cli.parse_args()
+
+    if args.loglevel.upper() not in LOGLEVELS:
+        raise SystemExit(u"{}: invalid log level, valid values: {}"
+                .format(args.loglevel, u", ".join(LOGLEVELS)))
+    logging.basicConfig(level=getattr(logging, args.loglevel.upper()),
+            format=u"%(levelname)s: %(message)s")
+
+    random.seed(args.randomseed)
+
+    main_spec_file_path = args.specfile.name
+    logging.info(u"Spec: \"%s\" (toplevel)", main_spec_file_path)
+    try:
+        spec = Spec.from_stream(args.specfile)
+        if not spec.has_payload:
+            raise SpecInstantiationError(spec, "empty spec")
+        config, packets = spec.instantiate()
+    except hipack.ParseError, e:
+        raise SystemExit(u"{}: {}".format(args.specfile.name, e))
+    except SpecError, e:
+        raise SystemExit(u"{}: invalid spec: {}".format(args.specfile.name, e))
+
+    logging.info(u"Output: \"%s\" (pcap)", args.pcapfile)
+    sink_pcap(packets, args.pcapfile, args.count)
+    logging.info(u"Generated %u packet(s)", args.count)
+

@@ -1,0 +1,7 @@
+ip {
+	.src "8.8.4.4"
+	.dst "1.1.21.68"
+	spec-file {
+		.name "imix-simple"
+	}
+}
