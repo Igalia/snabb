@@ -1,10 +1,10 @@
 #!/bin/bash
 # Modified from Diego's end-to-end benchmarking script
 
-SNABB_BASE=../../../..
-TEST_BASE=${SNABB_BASE}/tests/apps/lwaftr/data
-TEST_OUT=/tmp
-EMPTY=${TEST_BASE}/empty.pcap
+snabb_src=../../../..
+test_base=../data
+test_out=/tmp
+empty=${test_base}/empty.pcap
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root" 1>&2
@@ -16,7 +16,7 @@ function quit_with_msg {
 }
 
 function usage {
-    quit_with_msg "Usage: rep-bench v4.pcap v6.pcap <pcidev_v4> <pcidev_v6>"
+    quit_with_msg "Usage: benchmark-pcaps v4.pcap v6.pcap <pcidev_v4> <pcidev_v6>"
 }
 
 v4_pcap=$1
@@ -28,14 +28,14 @@ if [ -z "$pcidev_v6" ]; then
 fi
 
 function run_benchmark {
-    local script=${SNABB_BASE}/src/apps/lwaftr/benchmark.lua
-    local binding_table=${TEST_BASE}/binding.table
+    local script=${snabb_src}/apps/lwaftr/benchmark.lua
+    local binding_table=${test_base}/binding.table
     local conf=$1
     local pcap_file_v4=$2
     local pcap_file_v6=$3
 
-    ${SNABB_BASE}/src/snabb snsh $script $binding_table $conf $pcap_file_v4 $pcap_file_v6 $pcidev_v4 $pcidev_v6
+    ${snabb_src}/snabb snsh $script $binding_table $conf $pcap_file_v4 $pcap_file_v6 $pcidev_v4 $pcidev_v6
 }
 
 echo "Benchmarking..."
-run_benchmark ${TEST_BASE}/icmp_on_fail.conf $v4_pcap $v6_pcap
+run_benchmark ${test_base}/icmp_on_fail.conf $v4_pcap $v6_pcap
