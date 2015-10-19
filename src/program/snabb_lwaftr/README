@@ -1,0 +1,9 @@
+Usage:
+  snabb-lwaftr bench
+  snabb-lwaftr check
+  snabb-lwaftr run
+  snabb-lwaftr transient
+
+Use --help for per-command usage.
+Example:
+    snabb-lwaftr run --help

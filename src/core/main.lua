@@ -45,7 +45,7 @@ function main ()
          table.remove(args, 1)
       end
    end
-   local program = table.remove(args, 1)
+   local program = string.gsub(table.remove(args, 1), "-", "_")
    if not lib.have_module(modulename(program)) then
       print("unsupported program: "..programname(program))
       print()
@@ -74,7 +74,7 @@ end
 -- programname("snabbnfv-1.0") => "snabbnfv"
 function programname (program) 
    program = program:gsub("^.*/", "") -- /bin/snabb-1.0 => snabb-1.0
-   program = program:gsub("[-.].*$", "") -- snabb-1.0   => snabb
+   program = program:gsub("-[0-9.]+$", "") -- snabb-1.0   => snabb
    return program
 end
 -- modulename("nfv-sync-master.2.0") => "program.nfv.nfv_sync_master")
