@@ -52,13 +52,13 @@ arp._header_ptr_type = ffi.typeof("$*", arp_header_t)
 arp._ulp = { method = nil }
 
 -- Constants
-local arp_request = C.ntohs(1)
-local arp_reply = C.ntohs(2)
+local arp_request = C.htons(1)
+local arp_reply = C.htons(2)
 
 local unknown_eth = ethernet:pton("00:00:00:00:00:00")
 
-local ethernet_htype = C.ntohs(1)
-local ipv4_ptype = C.ntohs(0x0800)
+local ethernet_htype = C.htons(1)
+local ipv4_ptype = C.htons(0x0800)
 local ethernet_hlen = 6
 local ipv4_plen = 4
 
