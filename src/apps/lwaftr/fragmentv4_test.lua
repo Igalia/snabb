@@ -234,6 +234,128 @@ function test_reassemble_pattern_fragments()
 end
 
 
+function test_reassemble_unneeded()
+   print("test:   no reassembly needed (single packet)")
+
+   local pkt = make_ipv4_packet(500 - ip4_proto:sizeof() - eth_proto:sizeof())
+   pattern_fill(pkt.data + ip4_proto:sizeof() + eth_proto:sizeof(),
+                pkt.length - ip4_proto:sizeof() - eth_proto:sizeof())
+
+   local code, r = fragmentv4.reassemble_ipv4({ pkt })
+   assert(code == fragmentv4.REASSEMBLE_OK)
+   assert(r.length == pkt.length)
+   pattern_check(r.data + ip4_proto:sizeof() + eth_proto:sizeof(),
+                 r.length - ip4_proto:sizeof() - eth_proto:sizeof())
+end
+
+
+function test_reassemble_two_missing_fragments()
+   print("test:   two fragments (one missing)")
+   local pkt = assert(make_ipv4_packet(1200))
+   local code, fragments = fragmentv4.fragment_ipv4(pkt, 1000)
+   assert(code == fragmentv4.FRAGMENT_OK)
+   assert(#fragments == 2)
+
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[1] })))
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[2] })))
+end
+
+
+function test_reassemble_three_missing_fragments()
+   print("test:   three fragments (one/two missing)")
+   local pkt = assert(make_ipv4_packet(1000))
+   local code, fragments = fragmentv4.fragment_ipv4(pkt, 400)
+   assert(code == fragmentv4.FRAGMENT_OK)
+   assert(#fragments == 3)
+
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[1] })))
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[2] })))
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[3] })))
+
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[1], fragments[2] })))
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[1], fragments[3] })))
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[3], fragments[3] })))
+
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[2], fragments[1] })))
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[3], fragments[1] })))
+   assert(fragmentv4.REASSEMBLE_MISSING_FRAGMENT ==
+          (fragmentv4.reassemble_ipv4({ fragments[2], fragments[3] })))
+end
+
+
+function test_reassemble_two()
+   print("test:   payload=1200 mtu=1000")
+   local pkt = assert(make_ipv4_packet(1200))
+
+   -- Keep a copy of the packet, for comparisons
+   local orig_pkt = packet.allocate()
+   orig_pkt.length = pkt.length
+   ffi.copy(orig_pkt.data, pkt.data, pkt.length)
+
+   local code, fragments = fragmentv4.fragment_ipv4(pkt, 1000)
+   assert(code == fragmentv4.FRAGMENT_OK)
+   assert(#fragments == 2)
+
+   local function try(f)
+	   local code, pkt = fragmentv4.reassemble_ipv4(f)
+	   assert(code == fragmentv4.REASSEMBLE_OK, "returned: " .. code)
+	   assert(pkt.length == orig_pkt.length)
+
+	   for i = 1, pkt.length do
+		  assert(pkt.data[i] == orig_pkt.data[i],
+				 "byte["..i.."] expected="..orig_pkt.data[i].." got="..pkt.data[i])
+	   end
+   end
+
+   try { fragments[1], fragments[2] }
+   try { fragments[2], fragments[1] }
+end
+
+
+function test_reassemble_three()
+   print("test:   payload=1000 mtu=400")
+   local pkt = assert(make_ipv4_packet(1000))
+
+   -- Keep a copy of the packet, for comparisons
+   local orig_pkt = packet.allocate()
+   orig_pkt.length = pkt.length
+   ffi.copy(orig_pkt.data, pkt.data, pkt.length)
+
+   local code, fragments = fragmentv4.fragment_ipv4(pkt, 400)
+   assert(code == fragmentv4.FRAGMENT_OK)
+   assert(#fragments == 3)
+
+   local function try(f)
+	   local code, pkt = fragmentv4.reassemble_ipv4(f)
+	   assert(code == fragmentv4.REASSEMBLE_OK, "returned: " .. code)
+	   assert(pkt.length == orig_pkt.length)
+
+	   for i = 1, pkt.length do
+		  assert(pkt.data[i] == orig_pkt.data[i],
+				 "byte["..i.."] expected="..orig_pkt.data[i].." got="..pkt.data[i])
+	   end
+   end
+
+   try { fragments[1], fragments[2], fragments[3] }
+   try { fragments[2], fragments[3], fragments[1] }
+   try { fragments[3], fragments[1], fragments[2] }
+
+   try { fragments[3], fragments[2], fragments[1] }
+   try { fragments[2], fragments[1], fragments[3] }
+   try { fragments[1], fragments[3], fragments[2] }
+end
+
+
 function selftest()
    print("test: lwaftr.fragmentv4.fragment_ipv4")
    test_payload_1200_mtu_1500()
@@ -241,6 +363,13 @@ function selftest()
    test_payload_1200_mtu_400()
    test_dont_fragment_flag()
    test_reassemble_pattern_fragments()
+
+   print("test: lwaftr.fragmentv4.reassemnble_ipv4")
+   test_reassemble_unneeded()
+   test_reassemble_two_missing_fragments()
+   test_reassemble_three_missing_fragments()
+   test_reassemble_two()
+   test_reassemble_three()
 end
 
 -- Run tests when being invoked as a script from the command line.
