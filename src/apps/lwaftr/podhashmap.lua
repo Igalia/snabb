@@ -2,9 +2,10 @@ module(..., package.seeall)
 
 local ffi = require("ffi")
 local C = ffi.C
-local band = require("bit").band
-local tobit, bxor, bor, bnot = bit.tobit, bit.bxor, bit.bor, bit.bnot
-local lshift, rshift = bit.lshift, bit.rshift
+local S = require("syscall")
+local bit = require("bit")
+local band, bxor, bor, bnot = bit.band, bit.bxor, bit.bor, bit.bnot
+local tobit, lshift, rshift = bit.tobit, bit.lshift, bit.rshift
 
 PodHashMap = {}
 CachingPodHashMap = {}
@@ -15,13 +16,17 @@ local MIN_OCCUPANCY_RATE = 0.0
 
 --- 32 bytes
 local function make_entry_type(key_type, value_type)
-  return ffi.typeof([[struct {
-        int32_t hash;
-        $ key;
-        $ value;
-      }[?] __attribute__((packed))]],
+   return ffi.typeof([[struct {
+         int32_t hash;
+         $ key;
+         $ value;
+      } __attribute__((packed))]],
       key_type,
       value_type)
+end
+
+local function make_entries_type(entry_type)
+   return ffi.typeof('$[?]', entry_type)
 end
 
 local function entry_distance(hash, index, mask)
@@ -38,10 +43,11 @@ end
 function PodHashMap.new(entry_or_key_type, maybe_value_type)
    local phm = {}   
    if maybe_value_type then
-      phm.type = make_entry_type(entry_or_key_type, maybe_value_type)
+      phm.entry_type = make_entry_type(entry_or_key_type, maybe_value_type)
    else
-      phm.type = entry_or_key_type
+      phm.entry_type = entry_or_key_type
    end
+   phm.type = make_entries_type(phm.entry_type)
    phm.size = 0
    phm.occupancy = 0
    phm.max_occupancy_rate = MAX_OCCUPANCY_RATE
@@ -53,6 +59,42 @@ end
 
 local function is_power_of_two(n)
    return n ~= 0 and bit.band(n, n-1) == 0
+end
+
+function PodHashMap:save(filename)
+   local file = io.open(filename, "w")
+   file:write(ffi.string(self.entries, ffi.sizeof(self.type, self.size)))
+   file:close()
+end
+
+function PodHashMap:load(filename)
+   local fd, err = S.open(filename, "rdwr")
+   if not fd then
+      error("error opening saved hash table ("..path.."):"..tostring(err))
+   end
+   local size = S.fstat(fd).size
+   local entry_count = math.floor(size / ffi.sizeof(self.type, 1))
+   if size ~= ffi.sizeof(self.type, entry_count) then
+      fd:close()
+      error("corrupted saved hash table ("..path.."): bad size"..size)
+   end
+   local mem, err = S.mmap(nil, size, 'read, write', 'private', fd, 0)
+   fd:close()
+   if not mem then error("mmap failed: " .. tostring(err)) end
+   ffi.gc(mem, function (mem) S.munmap(mem, size) end)
+
+   -- OK!
+   self.size = entry_count
+   self.occupancy = 0
+   self.entries = ffi.cast(ffi.typeof('$*', self.entry_type), mem)
+   self.occupancy_hi = math.floor(self.size * self.max_occupancy_rate)
+   self.occupancy_lo = math.floor(self.size * self.min_occupancy_rate)
+
+   for i=0,self.size-1 do
+      if self.entries[i].hash ~= 0 then
+         self.occupancy = self.occupancy + 1
+      end
+   end
 end
 
 function PodHashMap:resize(size)
@@ -314,7 +356,7 @@ function CachingPodHashMap.new(store, cache_size)
    assert(is_power_of_two(cache_size))
    local cphm = {}
    cphm.store = store
-   cphm.cache = PodHashMap.new(store.type)
+   cphm.cache = PodHashMap.new(store.entry_type)
    cphm.cache:resize(cache_size)
    cphm.evict_index = 0
    return setmetatable(cphm, { __index = CachingPodHashMap })
