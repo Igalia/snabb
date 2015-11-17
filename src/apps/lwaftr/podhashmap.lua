@@ -129,6 +129,34 @@ function PodHashMap:add(hash, key, value)
    return index
 end
 
+local function lookup_helper(entries, size, hash, other_hash, key)
+   -- size must be a power of two!
+   local mask = size - 1
+   local index = band(hash, mask);
+
+   -- Fast path.
+   if hash == other_hash and key == entries[index].key then
+      -- Found!
+      return index
+   end
+
+   for distance=1, size-1 do
+      index = band(index + 1, mask);
+      if hash == entries[index].hash and key == entries[index].key then
+         -- Found!
+         return index
+      end
+      if entries[index].hash == 0 then return nil end
+      if entry_distance(entries[index].hash, index, mask) < distance then
+         -- The entry's distance is less; our key is not in the table.
+         return nil
+      end
+   end
+
+   -- Looped through the whole table!  Shouldn't happen, but hey.
+   return nil
+end
+
 function PodHashMap:lookup(hash, key)
    local entries = self.entries
    local size = self.size
@@ -162,6 +190,62 @@ function PodHashMap:lookup(hash, key)
 
    -- Looped through the whole table!  Shouldn't happen, but hey.
    return nil
+end
+
+function PodHashMap:lookup2(hash1, key1, hash2, key2)
+   return self:lookup(hash1, key1), self:lookup(hash2, key2)
+end
+
+function PodHashMap:lookup2p(hash1, key1, hash2, key2)
+   local entries = self.entries
+   local size = self.size
+
+   -- Entries whose hash is 0 are empty; ensure that all hashes for
+   -- non-empty entries ar e non-zero.
+   hash1, hash2 = bor(0x80000000, hash1), bor(0x80000000, hash2)
+
+   -- size must be a power of two!
+   local mask = size - 1
+   local index1, index2 = band(hash1, mask), band(hash2, mask)
+   local other_hash1, other_hash2 = entries[index1].hash, entries[index2].hash
+
+   local result1 = lookup_helper(entries, size, hash1, other_hash1, key1)
+   local result2 = lookup_helper(entries, size, hash2, other_hash2, key2)
+
+   return result1, result2
+end
+
+function PodHashMap:lookup4p(hash1, key1, hash2, key2, hash3, key3, hash4, key4)
+   -- Entries whose hash is 0 are empty; ensure that all hashes for
+   -- non-empty entries ar e non-zero.
+   hash1, hash2 = bor(0x80000000, hash1), bor(0x80000000, hash2)
+   hash3, hash4 = bor(0x80000000, hash3), bor(0x80000000, hash4)
+
+   -- size must be a power of two!
+   local entries, size = self.entries, self.size
+   local mask = self.size - 1
+   local index1, index2 = band(hash1, mask), band(hash2, mask)
+   local other_hash1, other_hash2 = entries[index1].hash, entries[index2].hash
+   local index3, index4 = band(hash1, mask), band(hash2, mask)
+   local other_hash3, other_hash4 = entries[index3].hash, entries[index4].hash
+
+   local result1 = lookup_helper(entries, size, hash1, other_hash1, key1)
+   local result2 = lookup_helper(entries, size, hash2, other_hash2, key2)
+   local result3 = lookup_helper(entries, size, hash3, other_hash3, key3)
+   local result4 = lookup_helper(entries, size, hash4, other_hash4, key4)
+
+   return result1, result2, result3, result4
+end
+
+function PodHashMap:prefetch(hash)
+   return self.entries[band(hash, self.size-1)].hash
+end
+
+function PodHashMap:lookup_with_prefetch(hash, key, prefetch)
+   -- Entries whose hash is 0 are empty; ensure that all hashes for
+   -- non-empty entries are non-zero.
+   hash = bor(0x80000000, hash)
+   return lookup_helper(self.entries, self.size, hash, prefetch, key)
 end
 
 function PodHashMap:remove_at(i)
