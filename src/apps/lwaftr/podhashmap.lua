@@ -70,13 +70,13 @@ end
 function PodHashMap:load(filename)
    local fd, err = S.open(filename, "rdwr")
    if not fd then
-      error("error opening saved hash table ("..path.."):"..tostring(err))
+      error("error opening saved hash table ("..filename.."): "..tostring(err))
    end
    local size = S.fstat(fd).size
    local entry_count = math.floor(size / ffi.sizeof(self.type, 1))
    if size ~= ffi.sizeof(self.type, entry_count) then
       fd:close()
-      error("corrupted saved hash table ("..path.."): bad size"..size)
+      error("corrupted saved hash table ("..filename.."): bad size: "..size)
    end
    local mem, err = S.mmap(nil, size, 'read, write', 'private', fd, 0)
    fd:close()
