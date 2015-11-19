@@ -85,15 +85,19 @@ function PodHashMap:load(filename)
    -- OK!
    self.size = entry_count
    self.occupancy = 0
+   self.max_displacement = 0
    self.entries = ffi.cast(ffi.typeof('$*', self.entry_type), mem)
    self.occupancy_hi = math.floor(self.size * self.max_occupancy_rate)
    self.occupancy_lo = math.floor(self.size * self.min_occupancy_rate)
 
    ffi.gc(self.entries, function (ptr) S.munmap(ptr, size) end)
 
+   local mask = self.size-1
    for i=0,self.size-1 do
       if self.entries[i].hash ~= 0 then
          self.occupancy = self.occupancy + 1
+         local displacement = entry_distance(self.entries[i].hash, i, mask)
+         self.max_displacement = math.max(self.max_displacement, displacement)
       end
    end
 end
@@ -106,6 +110,7 @@ function PodHashMap:resize(size)
 
    self.size = size
    self.occupancy = 0
+   self.max_displacement = 0
    self.entries = self.type(self.size)
    self.occupancy_hi = math.floor(self.size * self.max_occupancy_rate)
    self.occupancy_lo = math.floor(self.size * self.min_occupancy_rate)
@@ -163,6 +168,7 @@ function PodHashMap:add(hash, key, value)
    end
            
    self.occupancy = self.occupancy + 1
+   if distance > self.max_displacement then self.max_displacement = distance end
    entries[index].hash = hash
    entries[index].key = key
    entries[index].value = value
@@ -283,6 +289,7 @@ function PodHashMap:lookup_with_prefetch(hash, key, prefetch)
    return lookup_helper(self.entries, self.size, hash, prefetch, key)
 end
 
+-- FIXME: Does NOT shrink max_displacement
 function PodHashMap:remove_at(i)
    assert(not self:is_empty(i))
 
