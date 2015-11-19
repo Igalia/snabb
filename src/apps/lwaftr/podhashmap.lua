@@ -123,6 +123,55 @@ function PodHashMap:resize(size)
    end
 end
 
+function PodHashMap:prepare_lookup_bufs(stride)
+   return self.type(stride), self.type(stride * (self.max_displacement + 1))
+end
+
+function PodHashMap:fill_lookup_bufs(keys, results, stride)
+   local entries = self.entries
+   local mask = self.size - 1
+   local max_displacement = self.max_displacement
+   for i=0,stride-1 do
+      local hash = keys[i].hash
+      for j=0,max_displacement do
+         results[i * (max_displacement + 1) + j] = entries[band(hash + j, mask)]
+      end
+   end
+end
+
+function PodHashMap:lookup_from_bufs(keys, results, i)
+   local mask = self.size - 1
+   local max_displacement = self.max_displacement
+   local hash = keys[i].hash
+   local result = i * (max_displacement + 1)
+
+   -- Fast path.
+   if hash == results[result].hash and keys[i].key == results[result].key then
+      -- Found!
+      return result
+   end
+
+   -- The index at which we started looking in the original table.
+   local index = band(hash, mask)
+
+   for distance=1, max_displacement do
+      result = result + 1
+      index = band(index + 1, mask)
+      if hash == results[result].hash and keys[i].key == results[result].key then
+         -- Found.
+         return result
+      end
+      if results[result].hash == 0 then return nil end
+      if entry_distance(results[result].hash, index, mask) < distance then
+         -- The entry's distance is less; our key is not in the table.
+         return nil
+      end
+   end
+
+   -- Not found.
+   return nil
+end
+
 function PodHashMap:add(hash, key, value)
    if self.occupancy + 1 > self.size * self.max_occupancy_rate then
       self:resize(self.size * 2)
