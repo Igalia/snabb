@@ -32,9 +32,9 @@ local function run(params)
       rhh:fill_lookup_bufs(keys, results, n)
       for j = 0, n-1 do
          local result = rhh:lookup_from_bufs(keys, results, j)
-         assert(result, i+j)
-         assert(results[result].key == i+j)
-         assert(results[result].value == bit.bnot(i+j))
+      --   assert(result, i+j)
+      --   assert(results[result].key == i+j)
+      --   assert(results[result].value == bit.bnot(i+j))
       end
    end
    local stop = ffi.C.get_time_ns()
