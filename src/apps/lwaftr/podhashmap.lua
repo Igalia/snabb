@@ -218,6 +218,8 @@ function PodHashMap:add(hash, key, value)
 
          repeat
             local last = band(empty - 1, mask)
+            local delta = entry_distance(entries[last].hash, last, mask)
+            self.max_displacement = math.max(self.max_displacement, delta + 1)
             entries[empty] = entries[last]
             empty = last;
          until empty == index;
@@ -231,7 +233,7 @@ function PodHashMap:add(hash, key, value)
    end
            
    self.occupancy = self.occupancy + 1
-   if distance > self.max_displacement then self.max_displacement = distance end
+   self.max_displacement = math.max(self.max_displacement, distance)
    entries[index].hash = hash
    entries[index].key = key
    entries[index].value = value

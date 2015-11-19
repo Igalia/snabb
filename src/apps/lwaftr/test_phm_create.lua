@@ -21,6 +21,8 @@ local function run(params)
    local iter_rate = count/(tonumber(stop-start)/1e9)/1e6
    print(iter_rate..' million insertions per second')
 
+   local max_displacement = rhh.max_displacement
+   print('max displacement: '..max_displacement)
    print('saving '..filename)
    rhh:save(filename)
 
@@ -28,6 +30,8 @@ local function run(params)
    rhh:load(filename)
 
    print('verifying saved file')
+   print('max displacement: '..rhh.max_displacement)
+   assert(rhh.max_displacement == max_displacement)
    for i = 0, rhh.size-1 do
       local entry = rhh.entries[i]
       if entry.hash ~= 0 then
