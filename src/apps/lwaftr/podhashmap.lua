@@ -127,56 +127,40 @@ function PodHashMap:prepare_lookup_bufs(stride)
    return self.type(stride), self.type(stride * (self.max_displacement + 1))
 end
 
-function PodHashMap:fill_lookup_buf(hash, dst, width)
+function PodHashMap:fill_lookup_buf(hash, dst, offset, width)
    local entries = self.entries
    local mask = self.size - 1
    local unit_size = ffi.sizeof(self.entry_type)
    local start_index = band(hash, mask)
    local end_index = band(start_index + width, mask)
    if start_index < end_index then
-      ffi.copy(dst, entries + start_index, unit_size * width)
+      ffi.copy(dst + offset, entries + start_index, unit_size * width)
    else
       -- This width of entries wraps around.
       local tail_count = self.size - start_index
-      ffi.copy(dst, entries + start_index, unit_size * tail_count)
-      ffi.copy(dst + tail_count, entries, unit_size * ((width) - tail_count))
+      ffi.copy(dst + offset, entries + start_index, unit_size * tail_count)
+      ffi.copy(dst + offset + tail_count, entries, unit_size * ((width) - tail_count))
    end
 end
 
 function PodHashMap:fill_lookup_bufs(keys, results, stride)
    local width = self.max_displacement + 1
    for i=0,stride-1 do
-      self:fill_lookup_buf(keys[i].hash, results + i * width, width)
+      self:fill_lookup_buf(keys[i].hash, results, i * width, width)
    end
 end
 
 function PodHashMap:lookup_from_bufs(keys, results, i)
-   local mask = self.size - 1
    local max_displacement = self.max_displacement
-   local hash = keys[i].hash
    local result = i * (max_displacement + 1)
 
-   -- Fast path.
-   if hash == results[result].hash and keys[i].key == results[result].key then
-      -- Found!
-      return result
-   end
+   -- Fast path for displacement == 0.
+   if results[result].hash == 0 then return nil end
+   if keys[i].key == results[result].key then return result end
 
-   -- The index at which we started looking in the original table.
-   local index = band(hash, mask)
-
-   for distance=1, max_displacement do
-      result = result + 1
-      index = band(index + 1, mask)
-      if hash == results[result].hash and keys[i].key == results[result].key then
-         -- Found.
-         return result
-      end
+   for result = result+1, result+max_displacement+1 do
       if results[result].hash == 0 then return nil end
-      if entry_distance(results[result].hash, index, mask) < distance then
-         -- The entry's distance is less; our key is not in the table.
-         return nil
-      end
+      if keys[i].key == results[result].key then return result end
    end
 
    -- Not found.
