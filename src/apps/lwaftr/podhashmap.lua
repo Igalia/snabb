@@ -131,10 +131,24 @@ function PodHashMap:fill_lookup_bufs(keys, results, stride)
    local entries = self.entries
    local mask = self.size - 1
    local max_displacement = self.max_displacement
+   local unit_size = ffi.sizeof(self.entry_type)
    for i=0,stride-1 do
       local hash = keys[i].hash
-      for j=0,max_displacement do
-         results[i * (max_displacement + 1) + j] = entries[band(hash + j, mask)]
+      local start_index = band(hash, mask)
+      local end_index = band(start_index + max_displacement + 1, mask)
+      if (start_index < end_index) then
+         ffi.copy(results + i * (max_displacement + 1),
+                  entries + start_index,
+                  unit_size * (end_index - start_index))
+      else
+         -- This span of entries wraps around.
+         local tail_count = self.size - start_index
+         ffi.copy(results + i * (max_displacement + 1),
+                  entries + start_index,
+                  unit_size * tail_count)
+         ffi.copy(results + i * (max_displacement + 1) + tail_count,
+                  entries,
+                  unit_size * ((max_displacement + 1) - tail_count))
       end
    end
 end
