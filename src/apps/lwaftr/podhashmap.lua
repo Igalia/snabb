@@ -127,29 +127,26 @@ function PodHashMap:prepare_lookup_bufs(stride)
    return self.type(stride), self.type(stride * (self.max_displacement + 1))
 end
 
-function PodHashMap:fill_lookup_bufs(keys, results, stride)
+function PodHashMap:fill_lookup_buf(hash, dst, width)
    local entries = self.entries
    local mask = self.size - 1
-   local max_displacement = self.max_displacement
    local unit_size = ffi.sizeof(self.entry_type)
+   local start_index = band(hash, mask)
+   local end_index = band(start_index + width, mask)
+   if start_index < end_index then
+      ffi.copy(dst, entries + start_index, unit_size * width)
+   else
+      -- This width of entries wraps around.
+      local tail_count = self.size - start_index
+      ffi.copy(dst, entries + start_index, unit_size * tail_count)
+      ffi.copy(dst + tail_count, entries, unit_size * ((width) - tail_count))
+   end
+end
+
+function PodHashMap:fill_lookup_bufs(keys, results, stride)
+   local width = self.max_displacement + 1
    for i=0,stride-1 do
-      local hash = keys[i].hash
-      local start_index = band(hash, mask)
-      local end_index = band(start_index + max_displacement + 1, mask)
-      if (start_index < end_index) then
-         ffi.copy(results + i * (max_displacement + 1),
-                  entries + start_index,
-                  unit_size * (end_index - start_index))
-      else
-         -- This span of entries wraps around.
-         local tail_count = self.size - start_index
-         ffi.copy(results + i * (max_displacement + 1),
-                  entries + start_index,
-                  unit_size * tail_count)
-         ffi.copy(results + i * (max_displacement + 1) + tail_count,
-                  entries,
-                  unit_size * ((max_displacement + 1) - tail_count))
-      end
+      self:fill_lookup_buf(keys[i].hash, results + i * width, width)
    end
 end
 
