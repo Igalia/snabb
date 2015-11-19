@@ -81,7 +81,6 @@ function PodHashMap:load(filename)
    local mem, err = S.mmap(nil, size, 'read, write', 'private', fd, 0)
    fd:close()
    if not mem then error("mmap failed: " .. tostring(err)) end
-   ffi.gc(mem, function (mem) S.munmap(mem, size) end)
 
    -- OK!
    self.size = entry_count
@@ -89,6 +88,8 @@ function PodHashMap:load(filename)
    self.entries = ffi.cast(ffi.typeof('$*', self.entry_type), mem)
    self.occupancy_hi = math.floor(self.size * self.max_occupancy_rate)
    self.occupancy_lo = math.floor(self.size * self.min_occupancy_rate)
+
+   ffi.gc(self.entries, function (ptr) S.munmap(ptr, size) end)
 
    for i=0,self.size-1 do
       if self.entries[i].hash ~= 0 then
