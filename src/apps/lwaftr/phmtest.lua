@@ -1,17 +1,29 @@
 local ffi = require('ffi')
 local bit = require('bit')
 local hash_i32 = require("apps.lwaftr.podhashmap").hash_i32
+local murmur_hash_i32 = require("apps.lwaftr.podhashmap").murmur_hash_i32
 local phm = require("apps.lwaftr.podhashmap").PodHashMap
 local cphm = require("apps.lwaftr.podhashmap").CachingPodHashMap
 
 -- e.g. ./snabb snsh apps/lwaftr/phmtest.lua
 local function run(params)
-   print('hash rate test')
+   print('jenkins hash rate test')
    local start = ffi.C.get_time_ns()
    local result
    local count = 5e8
    for i = 1, count do
       result = hash_i32(i)
+   end
+   local stop = ffi.C.get_time_ns()
+   local iter_rate = count/(tonumber(stop-start)/1e9)/1e6
+   print(iter_rate..' million hashes per second (final result: '..result..')')
+
+   print('murmur hash rate test')
+   local start = ffi.C.get_time_ns()
+   local result
+   local count = 5e8
+   for i = 1, count do
+      result = murmur_hash_i32(i)
    end
    local stop = ffi.C.get_time_ns()
    local iter_rate = count/(tonumber(stop-start)/1e9)/1e6

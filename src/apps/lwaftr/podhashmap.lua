@@ -498,3 +498,13 @@ function hash_i32(i32)
 
    return i32
 end
+
+local murmur = require('lib.hash.murmur').MurmurHash3_x86_32:new()
+local vptr = ffi.new("uint8_t [4]")
+function murmur_hash_i32(i32)
+   ffi.cast("int32_t*", vptr)[0] = i32
+   local h = murmur:hash(vptr, 4, 0ULL)
+   -- Entries whose hash is 0 are empty; ensure that all hashes for
+   -- non-empty entries ar e non-zero.
+   return bor(0x80000000, h.u32[0])
+end
