@@ -332,7 +332,7 @@ function PodHashMap:lookup4p(hash1, key1, hash2, key2, hash3, key3, hash4, key4)
    local mask = self.size - 1
    local index1, index2 = band(hash1, mask), band(hash2, mask)
    local other_hash1, other_hash2 = entries[index1].hash, entries[index2].hash
-   local index3, index4 = band(hash1, mask), band(hash2, mask)
+   local index3, index4 = band(hash3, mask), band(hash4, mask)
    local other_hash3, other_hash4 = entries[index3].hash, entries[index4].hash
 
    local result1 = lookup_helper(entries, size, hash1, other_hash1, key1)
