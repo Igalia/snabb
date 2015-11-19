@@ -126,10 +126,6 @@ function PodHashMap:add(hash, key, value)
    local entries = self.entries
    local size = self.size
 
-   -- Entries whose hash is 0 are empty; ensure that all hashes for
-   -- non-empty entries ar e non-zero.
-   hash = bor(0x80000000, hash)
-
    -- size must be a power of two!
    local mask = size - 1
    local index = band(hash, mask);
@@ -142,7 +138,8 @@ function PodHashMap:add(hash, key, value)
       --- Update currently unsupported.
       assert(key ~= entries[index].key)
 
-      --- Displace the entry if our distance is less, otherwise keep looking.
+      --- Displace the entry if our distance is greater, otherwise keep
+      --- looking.
       if entry_distance(other_hash, index, mask) < distance then
          --- Rob from rich!  Note that it is absolutely imperative
          --- that there be space in the table for a new entry.
@@ -204,9 +201,7 @@ function PodHashMap:lookup(hash, key)
    local entries = self.entries
    local size = self.size
 
-   -- Entries whose hash is 0 are empty; ensure that all hashes for
-   -- non-empty entries ar e non-zero.
-   hash = bor(0x80000000, hash)
+   assert(hash ~= 0)
 
    -- size must be a power of two!
    local mask = size - 1
@@ -243,9 +238,8 @@ function PodHashMap:lookup2p(hash1, key1, hash2, key2)
    local entries = self.entries
    local size = self.size
 
-   -- Entries whose hash is 0 are empty; ensure that all hashes for
-   -- non-empty entries ar e non-zero.
-   hash1, hash2 = bor(0x80000000, hash1), bor(0x80000000, hash2)
+   assert(hash1 ~= 0)
+   assert(hash2 ~= 0)
 
    -- size must be a power of two!
    local mask = size - 1
@@ -259,10 +253,10 @@ function PodHashMap:lookup2p(hash1, key1, hash2, key2)
 end
 
 function PodHashMap:lookup4p(hash1, key1, hash2, key2, hash3, key3, hash4, key4)
-   -- Entries whose hash is 0 are empty; ensure that all hashes for
-   -- non-empty entries ar e non-zero.
-   hash1, hash2 = bor(0x80000000, hash1), bor(0x80000000, hash2)
-   hash3, hash4 = bor(0x80000000, hash3), bor(0x80000000, hash4)
+   assert(hash1 ~= 0)
+   assert(hash2 ~= 0)
+   assert(hash3 ~= 0)
+   assert(hash4 ~= 0)
 
    -- size must be a power of two!
    local entries, size = self.entries, self.size
@@ -285,9 +279,7 @@ function PodHashMap:prefetch(hash)
 end
 
 function PodHashMap:lookup_with_prefetch(hash, key, prefetch)
-   -- Entries whose hash is 0 are empty; ensure that all hashes for
-   -- non-empty entries are non-zero.
-   hash = bor(0x80000000, hash)
+   assert(hash ~= 0)
    return lookup_helper(self.entries, self.size, hash, prefetch, key)
 end
 
@@ -427,5 +419,10 @@ function hash_i32(i32)
    i32 = bxor(i32, rshift(i32, 6))
    i32 = i32 + bnot(lshift(i32, 11))
    i32 = bxor(i32, rshift(i32, 16))
+
+   -- Entries whose hash is 0 are empty; ensure that all hashes for
+   -- non-empty entries ar e non-zero.
+   i32 = bor(0x80000000, i32)
+
    return i32
 end

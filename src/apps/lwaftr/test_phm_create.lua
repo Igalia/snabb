@@ -31,7 +31,7 @@ local function run(params)
    for i = 0, rhh.size-1 do
       local entry = rhh.entries[i]
       if entry.hash ~= 0 then
-         assert(entry.hash == bit.bor(0x80000000, hash_i32(entry.key)))
+         assert(entry.hash == hash_i32(entry.key))
          assert(entry.value == bit.bnot(entry.key))
       end
    end
