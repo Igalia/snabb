@@ -9,8 +9,9 @@ local function run(params)
    local count, filename = unpack(params)
    count = assert(tonumber(count), "count not a number: "..count)
 
-   print('creating uint32->int32 podhashmap with '..count..' entries')
+   print('creating uint32->int32 podhashmap with '..count..' entries, 40% occupancy')
    local rhh = phm.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t'))
+   rhh:resize(count / 0.4 + 1)
    local start = ffi.C.get_time_ns()
    for i = 1, count do
       local h = hash_i32(i)
@@ -32,9 +33,9 @@ local function run(params)
    print('verifying saved file')
    print('max displacement: '..rhh.max_displacement)
    assert(rhh.max_displacement == max_displacement)
-   for i = 0, rhh.size-1 do
+   for i = 0, rhh.size*2-1 do
       local entry = rhh.entries[i]
-      if entry.hash ~= 0 then
+      if entry.hash ~= 0xffffffff then
          assert(entry.hash == hash_i32(entry.key))
          assert(entry.value == bit.bnot(entry.key))
       end

@@ -4,12 +4,14 @@ local ffi = require("ffi")
 local C = ffi.C
 local S = require("syscall")
 local bit = require("bit")
-local band, bxor, bor, bnot = bit.band, bit.bxor, bit.bor, bit.bnot
+local bxor, bnot = bit.bxor, bit.bnot
 local tobit, lshift, rshift = bit.tobit, bit.lshift, bit.rshift
+local max, floor = math.max, math.floor
 
 PodHashMap = {}
-CachingPodHashMap = {}
 
+local HASH_MAX = 0xFFFFFFFF
+local INT32_MIN = -0x80000000
 local INITIAL_SIZE = 8
 local MAX_OCCUPANCY_RATE = 0.9
 local MIN_OCCUPANCY_RATE = 0.0
@@ -17,7 +19,7 @@ local MIN_OCCUPANCY_RATE = 0.0
 --- 32 bytes
 local function make_entry_type(key_type, value_type)
    return ffi.typeof([[struct {
-         int32_t hash;
+         uint32_t hash;
          $ key;
          $ value;
       } __attribute__((packed))]],
@@ -29,15 +31,9 @@ local function make_entries_type(entry_type)
    return ffi.typeof('$[?]', entry_type)
 end
 
-local function entry_distance(hash, index, mask)
-   -- ORIGIN indicates the slot in the hash table at which HASH
-   -- would like to be placed: the slot for which the distance would
-   -- be zero.
-   local origin = band(hash, mask)
-
-   -- However we found this hash at INDEX.  The distance is the offset
-   -- from ORIGIN, taking wraparound into account.
-   return band(index - origin, mask)
+-- hash := [0,HASH_MAX); scale := size/HASH_MAX
+local function hash_to_index(hash, scale)
+   return floor(hash*scale + 0.5)
 end
 
 function PodHashMap.new(entry_or_key_type, maybe_value_type)
@@ -57,14 +53,23 @@ function PodHashMap.new(entry_or_key_type, maybe_value_type)
    return phm
 end
 
-local function is_power_of_two(n)
-   return n ~= 0 and bit.band(n, n-1) == 0
-end
-
 function PodHashMap:save(filename)
-   local file = io.open(filename, "w")
-   file:write(ffi.string(self.entries, ffi.sizeof(self.type, self.size)))
-   file:close()
+   local fd, err = S.open(filename, "creat, wronly")
+   if not fd then
+      error("error saving hash table, while creating "..filename..": "..tostring(err))
+   end
+   local size = ffi.sizeof(self.type, self.size * 2)
+   local ptr = ffi.cast("uint8_t*", self.entries)
+   while size > 0 do
+      local written, err = S.write(fd, ptr, size)
+      if not written then
+         fd:close()
+         error("error saving hash table, while writing "..filename..": "..tostring(err))
+      end
+      ptr = ptr + written
+      size = size - written
+   end
+   fd:close()
 end
 
 function PodHashMap:load(filename)
@@ -73,7 +78,7 @@ function PodHashMap:load(filename)
       error("error opening saved hash table ("..filename.."): "..tostring(err))
    end
    local size = S.fstat(fd).size
-   local entry_count = math.floor(size / ffi.sizeof(self.type, 1))
+   local entry_count = floor(size / ffi.sizeof(self.type, 1))
    if size ~= ffi.sizeof(self.type, entry_count) then
       fd:close()
       error("corrupted saved hash table ("..filename.."): bad size: "..size)
@@ -83,41 +88,41 @@ function PodHashMap:load(filename)
    if not mem then error("mmap failed: " .. tostring(err)) end
 
    -- OK!
-   self.size = entry_count
+   self.size = floor(entry_count / 2)
+   self.scale = self.size / HASH_MAX
    self.occupancy = 0
    self.max_displacement = 0
    self.entries = ffi.cast(ffi.typeof('$*', self.entry_type), mem)
-   self.occupancy_hi = math.floor(self.size * self.max_occupancy_rate)
-   self.occupancy_lo = math.floor(self.size * self.min_occupancy_rate)
+   self.occupancy_hi = floor(self.size * self.max_occupancy_rate)
+   self.occupancy_lo = floor(self.size * self.min_occupancy_rate)
 
    ffi.gc(self.entries, function (ptr) S.munmap(ptr, size) end)
 
-   local mask = self.size-1
-   for i=0,self.size-1 do
-      if self.entries[i].hash ~= 0 then
+   for i=0,self.size*2-1 do
+      if self.entries[i].hash ~= HASH_MAX then
          self.occupancy = self.occupancy + 1
-         local displacement = entry_distance(self.entries[i].hash, i, mask)
-         self.max_displacement = math.max(self.max_displacement, displacement)
+         local displacement = i - hash_to_index(self.entries[i].hash, self.scale)
+         self.max_displacement = max(self.max_displacement, displacement)
       end
    end
 end
 
 function PodHashMap:resize(size)
    assert(size >= (self.occupancy / self.max_occupancy_rate))
-   assert(is_power_of_two(size))
    local old_entries = self.entries
    local old_size = self.size
 
    self.size = size
+   self.scale = self.size / HASH_MAX
    self.occupancy = 0
    self.max_displacement = 0
-   self.entries = self.type(self.size)
-   self.occupancy_hi = math.floor(self.size * self.max_occupancy_rate)
-   self.occupancy_lo = math.floor(self.size * self.min_occupancy_rate)
-   for i=0,self.size-1 do self.entries[i].hash = 0 end
+   self.entries = self.type(self.size * 2)
+   self.occupancy_hi = floor(self.size * self.max_occupancy_rate)
+   self.occupancy_lo = floor(self.size * self.min_occupancy_rate)
+   for i=0,self.size*2-1 do self.entries[i].hash = HASH_MAX end
 
-   for i=0,old_size-1 do
-      if old_entries[i].hash ~= 0 then
+   for i=0,old_size*2-1 do
+      if old_entries[i].hash ~= HASH_MAX then
          self:add(old_entries[i].hash, old_entries[i].key, old_entries[i].value)
       end
    end
@@ -129,18 +134,9 @@ end
 
 function PodHashMap:fill_lookup_buf(hash, dst, offset, width)
    local entries = self.entries
-   local mask = self.size - 1
    local unit_size = ffi.sizeof(self.entry_type)
-   local start_index = band(hash, mask)
-   local end_index = band(start_index + width, mask)
-   if start_index < end_index then
-      ffi.copy(dst + offset, entries + start_index, unit_size * width)
-   else
-      -- This width of entries wraps around.
-      local tail_count = self.size - start_index
-      ffi.copy(dst + offset, entries + start_index, unit_size * tail_count)
-      ffi.copy(dst + offset + tail_count, entries, unit_size * ((width) - tail_count))
-   end
+   local start_index = hash_to_index(hash, self.scale)
+   ffi.copy(dst + offset, entries + start_index, unit_size * width)
 end
 
 function PodHashMap:fill_lookup_bufs(keys, results, stride)
@@ -155,12 +151,17 @@ function PodHashMap:lookup_from_bufs(keys, results, i)
    local result = i * (max_displacement + 1)
 
    -- Fast path for displacement == 0.
-   if results[result].hash == 0 then return nil end
-   if keys[i].key == results[result].key then return result end
+   if results[result].hash == keys[i].hash then
+      if keys[i].key == results[result].key then
+         return result
+      end
+   end
 
    for result = result+1, result+max_displacement+1 do
-      if results[result].hash == 0 then return nil end
-      if keys[i].key == results[result].key then return result end
+      if results[result].hash > keys[i].hash then return nil end
+      if results[result].hash == keys[i].hash then
+         if keys[i].key == results[result].key then return result end
+      end
    end
 
    -- Not found.
@@ -173,113 +174,79 @@ function PodHashMap:add(hash, key, value)
    end
 
    local entries = self.entries
-   local size = self.size
+   local scale = self.scale
+   local start_index = hash_to_index(hash, self.scale)
+   local index = start_index
+   --print('adding ', hash, key, value, index)
 
-   -- size must be a power of two!
-   local mask = size - 1
-   local index = band(hash, mask);
-   local distance = 0
+   while entries[index].hash < hash do
+      --print('displace', index, entries[index].hash)
+      index = index + 1
+   end
 
-   while true do
-      local other_hash = entries[index].hash
-      if other_hash == 0 then break end
-
+   while entries[index].hash == hash do
       --- Update currently unsupported.
+      --print('update?', index)
       assert(key ~= entries[index].key)
+      index = index + 1
+   end
 
-      --- Displace the entry if our distance is greater, otherwise keep
-      --- looking.
-      if entry_distance(other_hash, index, mask) < distance then
-         --- Rob from rich!  Note that it is absolutely imperative
-         --- that there be space in the table for a new entry.
-         local empty = index;
-         repeat
-            empty = band(empty + 1, mask)
-         until entries[empty].hash == 0
+   self.max_displacement = max(self.max_displacement, index - start_index)
 
-         repeat
-            local last = band(empty - 1, mask)
-            local delta = entry_distance(entries[last].hash, last, mask)
-            self.max_displacement = math.max(self.max_displacement, delta + 1)
-            entries[empty] = entries[last]
-            empty = last;
-         until empty == index;
-
-         -- Now entries[index] free to be set
-         break
+   if entries[index].hash ~= HASH_MAX then
+      --- Rob from rich!
+      --print('steal', index)
+      local empty = index;
+      while entries[empty].hash ~= HASH_MAX do empty = empty + 1 end
+      --print('end', empty)
+      while empty > index do
+         entries[empty] = entries[empty - 1]
+         local displacement = empty - hash_to_index(entries[empty].hash, scale)
+         self.max_displacement = max(self.max_displacement, displacement)
+         empty = empty - 1;
       end
-
-      distance = distance + 1
-      index = band(index + 1, mask)
    end
            
    self.occupancy = self.occupancy + 1
-   self.max_displacement = math.max(self.max_displacement, distance)
    entries[index].hash = hash
    entries[index].key = key
    entries[index].value = value
    return index
 end
 
-local function lookup_helper(entries, size, hash, other_hash, key)
-   -- size must be a power of two!
-   local mask = size - 1
-   local index = band(hash, mask);
-
-   -- Fast path.
+local function lookup_helper(entries, index, hash, other_hash, key)
    if hash == other_hash and key == entries[index].key then
       -- Found!
       return index
    end
 
-   for distance=1, size-1 do
-      index = band(index + 1, mask);
-      if hash == entries[index].hash and key == entries[index].key then
+   while other_hash < hash do
+      index = index + 1
+      other_hash = entries[index].hash
+   end
+
+   while other_hash == hash do
+      if key == entries[index].key then
          -- Found!
          return index
       end
-      if entries[index].hash == 0 then return nil end
-      if entry_distance(entries[index].hash, index, mask) < distance then
-         -- The entry's distance is less; our key is not in the table.
-         return nil
-      end
+      -- Otherwise possibly a collision.
+      index = index + 1
+      other_hash = entries[index].hash
    end
 
-   -- Looped through the whole table!  Shouldn't happen, but hey.
+   -- Not found.
    return nil
 end
 
 function PodHashMap:lookup(hash, key)
+   assert(hash ~= HASH_MAX)
+
    local entries = self.entries
-   local size = self.size
+   local index = hash_to_index(hash, self.scale)
+   local other_hash = entries[index].hash
 
-   assert(hash ~= 0)
-
-   -- size must be a power of two!
-   local mask = size - 1
-   local index = band(hash, mask);
-
-   -- Fast path.
-   if hash == entries[index].hash and key == entries[index].key then
-      -- Found!
-      return index
-   end
-
-   for distance=1, size-1 do
-      index = band(index + 1, mask);
-      if hash == entries[index].hash and key == entries[index].key then
-         -- Found!
-         return index
-      end
-      if entries[index].hash == 0 then return nil end
-      if entry_distance(entries[index].hash, index, mask) < distance then
-         -- The entry's distance is less; our key is not in the table.
-         return nil
-      end
-   end
-
-   -- Looped through the whole table!  Shouldn't happen, but hey.
-   return nil
+   return lookup_helper(entries, index, hash, other_hash, key)
 end
 
 function PodHashMap:lookup2(hash1, key1, hash2, key2)
@@ -287,52 +254,54 @@ function PodHashMap:lookup2(hash1, key1, hash2, key2)
 end
 
 function PodHashMap:lookup2p(hash1, key1, hash2, key2)
-   local entries = self.entries
-   local size = self.size
+   assert(hash1 ~= HASH_MAX)
+   assert(hash2 ~= HASH_MAX)
 
-   assert(hash1 ~= 0)
-   assert(hash2 ~= 0)
+   local entries, scale = self.entries, self.scale
 
-   -- size must be a power of two!
-   local mask = size - 1
-   local index1, index2 = band(hash1, mask), band(hash2, mask)
-   local other_hash1, other_hash2 = entries[index1].hash, entries[index2].hash
+   local index1 = hash_to_index(hash1, scale)
+   local other_hash1 = entries[index1].hash
+   local index2 = hash_to_index(hash2, scale)
+   local other_hash2 = entries[index2].hash
 
-   local result1 = lookup_helper(entries, size, hash1, other_hash1, key1)
-   local result2 = lookup_helper(entries, size, hash2, other_hash2, key2)
+   local result1 = lookup_helper(entries, index1, hash1, other_hash1, key1)
+   local result2 = lookup_helper(entries, index2, hash2, other_hash2, key2)
 
    return result1, result2
 end
 
 function PodHashMap:lookup4p(hash1, key1, hash2, key2, hash3, key3, hash4, key4)
-   assert(hash1 ~= 0)
-   assert(hash2 ~= 0)
-   assert(hash3 ~= 0)
-   assert(hash4 ~= 0)
+   assert(hash1 ~= HASH_MAX)
+   assert(hash2 ~= HASH_MAX)
+   assert(hash3 ~= HASH_MAX)
+   assert(hash4 ~= HASH_MAX)
 
-   -- size must be a power of two!
-   local entries, size = self.entries, self.size
-   local mask = self.size - 1
-   local index1, index2 = band(hash1, mask), band(hash2, mask)
-   local other_hash1, other_hash2 = entries[index1].hash, entries[index2].hash
-   local index3, index4 = band(hash3, mask), band(hash4, mask)
-   local other_hash3, other_hash4 = entries[index3].hash, entries[index4].hash
+   local entries, scale = self.entries, self.scale
 
-   local result1 = lookup_helper(entries, size, hash1, other_hash1, key1)
-   local result2 = lookup_helper(entries, size, hash2, other_hash2, key2)
-   local result3 = lookup_helper(entries, size, hash3, other_hash3, key3)
-   local result4 = lookup_helper(entries, size, hash4, other_hash4, key4)
+   local index1 = hash_to_index(hash1, scale)
+   local other_hash1 = entries[index1].hash
+   local index2 = hash_to_index(hash2, scale)
+   local other_hash2 = entries[index2].hash
+   local index3 = hash_to_index(hash3, scale)
+   local other_hash3 = entries[index3].hash
+   local index4 = hash_to_index(hash4, scale)
+   local other_hash4 = entries[index4].hash
+
+   local result1 = lookup_helper(entries, index1, hash1, other_hash1, key1)
+   local result2 = lookup_helper(entries, index2, hash2, other_hash2, key2)
+   local result3 = lookup_helper(entries, index3, hash3, other_hash3, key3)
+   local result4 = lookup_helper(entries, index4, hash4, other_hash4, key4)
 
    return result1, result2, result3, result4
 end
 
 function PodHashMap:prefetch(hash)
-   return self.entries[band(hash, self.size-1)].hash
+   return self.entries[hash_to_index(hash, self.scale)].hash
 end
 
 function PodHashMap:lookup_with_prefetch(hash, key, prefetch)
-   assert(hash ~= 0)
-   return lookup_helper(self.entries, self.size, hash, prefetch, key)
+   assert(hash ~= HASH_MAX)
+   return lookup_helper(self.entries, hash_to_index(hash, self.scale), hash, prefetch, key)
 end
 
 -- FIXME: Does NOT shrink max_displacement
@@ -340,30 +309,30 @@ function PodHashMap:remove_at(i)
    assert(not self:is_empty(i))
 
    local entries = self.entries
-   local size = self.size
+   local scale = self.scale
 
    self.occupancy = self.occupancy - 1
-   entries[i].hash = 0
+   entries[i].hash = HASH_MAX
+
+   while true do
+      local next = i + 1
+      local next_hash = entries[next].hash
+      if next_hash == HASH_MAX then break end
+      if hash_to_index(next_hash, scale) == next then break end
+      -- Give to the poor.
+      entries[i] = entries[next]
+      entries[next].hash = HASH_MAX
+      i = next
+   end
 
    if self.occupancy < self.size * self.min_occupancy_rate then
       self:resize(self.size / 2)
-   else
-      local mask = size - 1
-      while true do
-         local next = band(i + 1, mask)
-         local next_hash = entries[next].hash
-         if next_hash == 0 or band(next_hash, mask) == next then break end
-         -- Give to the poor.
-         entries[i] = entries[next]
-         entries[next].hash = 0
-         i = next
-      end
    end
 end
 
 function PodHashMap:is_empty(i)
-   assert(i >= 0 and i < self.size)
-   return self.entries[i].hash == 0
+   assert(i >= 0 and i < self.size*2)
+   return self.entries[i].hash == HASH_MAX
 end
 
 function PodHashMap:hash_at(i)
@@ -382,83 +351,23 @@ function PodHashMap:val_at(i)
 end
 
 function PodHashMap:dump()
-   local mask = self.size - 1
-   for index=0,self.size-1 do
+   local function dump_one(index)
       io.write(index..':')
       local entry = self.entries[index]
-      if (entry.hash == 0) then
+      if (entry.hash == HASH_MAX) then
          io.write('\n')
       else
-         local distance = entry_distance(entry.hash, index, mask)
+         local distance = index - hash_to_index(entry.hash, self.scale)
          io.write(' hash: '..entry.hash..' (distance: '..distance..')\n')
          io.write('    key: '..tostring(entry.key)..'\n')
          io.write('  value: '..tostring(entry.value)..'\n')
       end
    end
-end
-
---==============
-function CachingPodHashMap.new(store, cache_size)
-   assert(is_power_of_two(cache_size))
-   local cphm = {}
-   cphm.store = store
-   cphm.cache = PodHashMap.new(store.entry_type)
-   cphm.cache:resize(cache_size)
-   cphm.evict_index = 0
-   return setmetatable(cphm, { __index = CachingPodHashMap })
-end
-
-function CachingPodHashMap:add(hash, key, value)
-   local index = self.cache:lookup(hash, key)
-   if index then self.cache:remove_at(index) end
-   return self.store:add(hash, key, value)
-end
-
-function CachingPodHashMap:lookup(hash, key)
-   local index = self.cache:lookup(hash, key)
-   if index then return index end
-   local store_index = self.store:lookup(hash, key)
-   if not store_index then return nil end
-   local cache = self.cache
-   if cache.occupancy + 1 > cache.occupancy_hi then self:evict_one() end
-   return cache:add(hash, key, self.store:val_at(store_index))
-end
-
-function CachingPodHashMap:evict_one()
-   local cache, index = self.cache, self.evict_index
-   assert(cache.occupancy > 0)
-   while cache:is_empty(index) do index = band(index+1, cache.size-1) end
-   cache:remove_at(index)
-   self.evict_index = band(index+1, cache.size-1)
-end
-
-function CachingPodHashMap:remove_at(i)
-   local hash, key = self:hash_at(i), self:key_at(i)
-   self.cache:remove_at(i)
-   self.store:remove_at(self.store:lookup(hash, key))
-end
-
-function CachingPodHashMap:is_empty(i)
-   return self.cache:is_empty(i)
-end
-
-function CachingPodHashMap:hash_at(i)
-   return self.cache:hash_at(i)
-end
-
-function CachingPodHashMap:key_at(i)
-   return self.cache:key_at(i)
-end
-
-function CachingPodHashMap:val_at(i)
-   return self.cache:val_at(i)
-end
-
-function CachingPodHashMap:dump()
-   print('cache:')
-   self.cache:dump()
-   print('store:')
-   self.store:dump()
+   for index=0,self.size-1 do dump_one(index) end
+   for index=self.size,self.size*2-1 do
+      if self.entries[index].hash == HASH_MAX then break end
+      dump_one(index)
+   end
 end
 
 -- One of Bob Jenkins' hashes from
@@ -473,19 +382,20 @@ function hash_i32(i32)
    i32 = i32 + bnot(lshift(i32, 11))
    i32 = bxor(i32, rshift(i32, 16))
 
-   -- Entries whose hash is 0 are empty; ensure that all hashes for
-   -- non-empty entries ar e non-zero.
-   i32 = bor(0x80000000, i32)
-
-   return i32
+   -- Unset the low bit, to distinguish valid hashes from HASH_MAX.
+   i32 = lshift(i32, 1)
+   -- Project result to u32 range.
+   return i32 - INT32_MIN
 end
 
 local murmur = require('lib.hash.murmur').MurmurHash3_x86_32:new()
 local vptr = ffi.new("uint8_t [4]")
 function murmur_hash_i32(i32)
    ffi.cast("int32_t*", vptr)[0] = i32
-   local h = murmur:hash(vptr, 4, 0ULL)
-   -- Entries whose hash is 0 are empty; ensure that all hashes for
-   -- non-empty entries ar e non-zero.
-   return bor(0x80000000, h.u32[0])
+   local h = murmur:hash(vptr, 4, 0ULL).u32[0]
+
+   -- Unset the low bit, to distinguish valid hashes from HASH_MAX.
+   local i32 = lshift(i32, 1)
+   -- Project result to u32 range.
+   return i32 - INT32_MIN
 end
