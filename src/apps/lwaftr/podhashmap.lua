@@ -115,7 +115,7 @@ function PodHashMap:resize(size)
 
    local byte_size = size * 2 * ffi.sizeof(self.type, 1)
    local mem, err
-   if try_huge_pages then
+   if try_huge_pages and byte_size > 1e6 then
       mem, err = S.mmap(nil, byte_size, 'read, write',
                               'private, anonymous, hugetlb')
       if not mem then
