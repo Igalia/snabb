@@ -249,59 +249,8 @@ function PodHashMap:lookup(hash, key)
    return lookup_helper(entries, index, hash, other_hash, key)
 end
 
-function PodHashMap:lookup2(hash1, key1, hash2, key2)
-   return self:lookup(hash1, key1), self:lookup(hash2, key2)
-end
-
-function PodHashMap:lookup2p(hash1, key1, hash2, key2)
-   assert(hash1 ~= HASH_MAX)
-   assert(hash2 ~= HASH_MAX)
-
-   local entries, scale = self.entries, self.scale
-
-   local index1 = hash_to_index(hash1, scale)
-   local other_hash1 = entries[index1].hash
-   local index2 = hash_to_index(hash2, scale)
-   local other_hash2 = entries[index2].hash
-
-   local result1 = lookup_helper(entries, index1, hash1, other_hash1, key1)
-   local result2 = lookup_helper(entries, index2, hash2, other_hash2, key2)
-
-   return result1, result2
-end
-
-function PodHashMap:lookup4p(hash1, key1, hash2, key2, hash3, key3, hash4, key4)
-   assert(hash1 ~= HASH_MAX)
-   assert(hash2 ~= HASH_MAX)
-   assert(hash3 ~= HASH_MAX)
-   assert(hash4 ~= HASH_MAX)
-
-   local entries, scale = self.entries, self.scale
-
-   local index1 = hash_to_index(hash1, scale)
-   local other_hash1 = entries[index1].hash
-   local index2 = hash_to_index(hash2, scale)
-   local other_hash2 = entries[index2].hash
-   local index3 = hash_to_index(hash3, scale)
-   local other_hash3 = entries[index3].hash
-   local index4 = hash_to_index(hash4, scale)
-   local other_hash4 = entries[index4].hash
-
-   local result1 = lookup_helper(entries, index1, hash1, other_hash1, key1)
-   local result2 = lookup_helper(entries, index2, hash2, other_hash2, key2)
-   local result3 = lookup_helper(entries, index3, hash3, other_hash3, key3)
-   local result4 = lookup_helper(entries, index4, hash4, other_hash4, key4)
-
-   return result1, result2, result3, result4
-end
-
 function PodHashMap:prefetch(hash)
    return self.entries[hash_to_index(hash, self.scale)].hash
-end
-
-function PodHashMap:lookup_with_prefetch(hash, key, prefetch)
-   assert(hash ~= HASH_MAX)
-   return lookup_helper(self.entries, hash_to_index(hash, self.scale), hash, prefetch, key)
 end
 
 -- FIXME: Does NOT shrink max_displacement
@@ -348,6 +297,44 @@ end
 function PodHashMap:val_at(i)
    assert(not self:is_empty(i))
    return self.entries[i].value
+end
+
+function PodHashMap:selfcheck(hash_fn)
+   local occupancy = 0
+   local max_displacement = 0
+
+   local function fail(expected, op, found, what, where)
+      if where then where = 'at '..where..': ' else where = '' end
+      error(where..what..' check: expected '..expected..op..'found '..found)
+   end
+   local function expect_eq(expected, found, what, where)
+      if expected ~= found then fail(expected, '==', found, what, where) end
+   end
+   local function expect_le(expected, found, what, where)
+      if expected > found then fail(expected, '<=', found, what, where) end
+   end
+
+   local prev = 0
+   for i = 0,self.size*2-1 do
+      local entry = self.entries[i]
+      local hash = entry.hash
+      if hash ~= 0xffffffff then
+         expect_eq(hash_fn(entry.key), hash, 'hash', i)
+         local index = hash_to_index(hash, self.scale)
+         if prev == 0xffffffff then
+            expect_eq(index, i, 'undisplaced index', i)
+         else
+            expect_le(prev, hash, 'displaced hash', i)
+         end
+         occupancy = occupancy + 1
+         max_displacement = max(max_displacement, i - index)
+      end
+      prev = hash
+   end
+
+   expect_eq(occupancy, self.occupancy, 'occupancy')
+   -- Compare using <= because remove_at doesn't update max_displacement.
+   expect_le(max_displacement, self.max_displacement, 'max_displacement')
 end
 
 function PodHashMap:dump()
@@ -398,4 +385,152 @@ function murmur_hash_i32(i32)
    local i32 = lshift(i32, 1)
    -- Project result to u32 range.
    return i32 - INT32_MIN
+end
+
+function selfcheck()
+   local pmu = require('lib.pmu')
+   local has_pmu_counters, err = pmu.is_available()
+   if not has_pmu_counters then
+      print('No PMU available: '..err)
+      print('Measuring nanoseconds instead of cycles.')
+   end
+
+   local function count_cycles(f, iterations)
+      pmu.setup({"ref_cycles"})
+      local set = pmu.new_counter_set()
+      pmu.switch_to(set)
+      local res = f(iterations)
+      pmu.switch_to(nil)
+      return pmu.to_table(set).ref_cycles, res
+   end
+
+   local function count_ns(f, iterations)
+      local start = C.get_time_ns()
+      local res = f(iterations)
+      local stop = C.get_time_ns()
+      return tonumber(stop-start), res
+   end
+
+   local function check_perf(f, iterations, max, measure, unit, what)
+      io.write(tostring(what or f)..': ')
+      io.flush()
+      local total, res = measure(f, iterations)
+      local per_iteration = total / iterations
+      io.write(per_iteration..' '..unit..'/iteration (result: '..tostring(res)..')\n')
+      if per_iteration > max then
+         error('perfmark failed: exceeded maximum '..max)
+      end
+      return res
+   end
+
+   local function assert_cycles_or_ns_le(f, iterations, cycles, ns, what)
+      require('jit').flush()
+      if has_pmu_counters then
+         return check_perf(f, iterations, cycles, count_cycles, 'cycles', what)
+      else
+         return check_perf(f, iterations, ns, count_ns, 'ns', what)
+      end
+   end
+
+   local function test_jenkins(iterations)
+      local result
+      for i=1,iterations do result=hash_i32(i) end
+      return result
+   end
+
+   local function test_murmur(iterations)
+      local result
+      for i=1,iterations do result=murmur_hash_i32(i) end
+      return result
+   end
+
+   assert_cycles_or_ns_le(test_jenkins, 1e8, 15, 4, 'jenkins hash')
+   assert_cycles_or_ns_le(test_murmur, 1e8, 30, 8, 'murmur hash (32 bit)')
+
+   local rhh = PodHashMap.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t'))
+   rhh:resize(1e7 / 0.4 + 1)
+
+   local function test_insertion(count)
+      for i = 1, count do
+         local h = hash_i32(i)
+         local v = bnot(i)
+         rhh:add(h, i, v)
+      end
+   end
+
+   local function test_lookup(count)
+      local result
+      for i = 1, count do
+         result = rhh:lookup(hash_i32(i), i)
+      end
+      return result
+   end
+
+   local function test_lookup_with_2x_prefetch(count)
+      local r1, r2
+      for i = 1, count, 2 do
+         local h1, h2 = hash_i32(i), hash_i32(i+1)
+         rhh:prefetch(h1)
+         rhh:prefetch(h2)
+         r1, r2 = rhh:lookup(h1, i), rhh:lookup(h2, i+1)
+      end
+      return r2
+   end
+
+   assert_cycles_or_ns_le(test_insertion, 1e7, 400, 100,
+                          'insertion (40% occupancy)')
+   print('max displacement: '..rhh.max_displacement)
+   io.write('selfcheck: ')
+   io.flush()
+   rhh:selfcheck(hash_i32)
+   io.write('pass\n')
+
+   io.write('population check: ')
+   io.flush()
+   for i = 1, 1e7 do
+      local offset = rhh:lookup(hash_i32(i), i)
+      assert(rhh:val_at(offset) == bnot(i))
+   end
+   rhh:selfcheck(hash_i32)
+   io.write('pass\n')
+
+   assert_cycles_or_ns_le(test_lookup, 1e7, 300, 100,
+                          'lookup (40% occupancy)')
+   assert_cycles_or_ns_le(test_lookup_with_2x_prefetch, 1e7, 300, 100,
+                          'lookup with 2x prefetch (40% occupancy)')
+
+   local stride = 1
+   repeat
+      local keys, results = rhh:prepare_lookup_bufs(stride)
+   
+      local function test_lookup_with_bufs(count)
+         local result
+         local top = floor(count/stride)*stride
+         for i = 1, top, stride do
+            for j = 0, stride-1 do
+               keys[j].hash = hash_i32(i+j)
+               keys[j].key = i+j
+            end
+            rhh:fill_lookup_bufs(keys, results, stride)
+            for j = 0, stride-1 do
+               result = rhh:lookup_from_bufs(keys, results, j)
+            end
+         end
+         -- Read the tail in a separate loop.  Seems silly.
+         local tail = count - top
+         for j = 0, tail-1 do
+            keys[j].hash = hash_i32(top+1+j)
+            keys[j].key = top+1+j
+         end
+         rhh:fill_lookup_bufs(keys, results, tail)
+         for i = 0, tail - 1 do
+            result = rhh:lookup_from_bufs(keys, results, i)
+         end
+         return result
+      end
+
+      assert_cycles_or_ns_le(test_lookup_with_bufs, 1e7, 1000, 100,
+                             'lookup, stride='..stride)
+      stride = stride * 2
+   until stride > 256
 end

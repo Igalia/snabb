@@ -6,27 +6,7 @@ local phm = require("apps.lwaftr.podhashmap").PodHashMap
 
 -- e.g. ./snabb snsh apps/lwaftr/phmtest.lua
 local function run(params)
-   print('jenkins hash rate test')
-   local start = ffi.C.get_time_ns()
-   local result
-   local count = 5e8
-   for i = 1, count do
-      result = hash_i32(i)
-   end
-   local stop = ffi.C.get_time_ns()
-   local iter_rate = count/(tonumber(stop-start)/1e9)/1e6
-   print(iter_rate..' million hashes per second (final result: '..result..')')
-
-   print('murmur hash rate test')
-   local start = ffi.C.get_time_ns()
-   local result
-   local count = 5e8
-   for i = 1, count do
-      result = murmur_hash_i32(i)
-   end
-   local stop = ffi.C.get_time_ns()
-   local iter_rate = count/(tonumber(stop-start)/1e9)/1e6
-   print(iter_rate..' million hashes per second (final result: '..result..')')
+   require("apps.lwaftr.podhashmap").selfcheck()
 
    print('insertion rate test (40% occupancy)')
    local rhh = phm.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t'))
@@ -42,15 +22,10 @@ local function run(params)
    iter_rate = count/(tonumber(stop-start)/1e9)/1e6
    print(iter_rate..' million insertions per second')
 
-   print('verification')
-   for i = 0, rhh.size*2-1 do
-      local entry = rhh.entries[i]
-      if entry.hash ~= 0xffffffff then
-         assert(entry.hash == hash_i32(entry.key))
-         assert(entry.value == bit.bnot(entry.key))
-      end
-   end
+   print('selfcheck')
+   rhh:selfcheck(hash_i32)
 
+   print('population check')
    for i = 1, count do
       local offset = rhh:lookup(hash_i32(i), i)
       assert(rhh:val_at(offset) == bit.bnot(i))
@@ -101,12 +76,12 @@ local function run(params)
    start = ffi.C.get_time_ns()
    for i = 1, count, 2 do
       local hash2 = hash_i32(i)
-      local prefetch2 = rhh:prefetch(hash2)
+      rhh:prefetch(hash2)
       local hash1 = hash_i32(i+1)
-      local prefetch1 = rhh:prefetch(hash1)
+      rhh:prefetch(hash1)
 
-      result2 = rhh:lookup_with_prefetch(hash2, i, prefetch2)
-      result = rhh:lookup_with_prefetch(hash1, i+1, prefetch1)
+      result2 = rhh:lookup(hash2, i)
+      result = rhh:lookup(hash1, i+1)
    end
    stop = ffi.C.get_time_ns()
    iter_rate = count/(tonumber(stop-start)/1e9)/1e6

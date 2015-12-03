@@ -199,7 +199,7 @@ function setup (patterns)
       table.sort(set)
    end
    local ndropped = math.max(0, #set - pmu_x86.ngeneral)
-   if ndropped > 0 then set[pmu_x86.ngeneral+1] = nil end
+   while #set > pmu_x86.ngeneral do table.remove(set) end
    local cpu = cpu_set()[1]
    -- Enable all fixed-function counters (IA32_FIXED_CTR_CTRL)
    writemsr(cpu, 0x38d, 0x333)
