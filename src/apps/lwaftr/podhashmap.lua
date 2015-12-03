@@ -107,19 +107,38 @@ function PodHashMap:load(filename)
    end
 end
 
+local try_huge_pages = true
 function PodHashMap:resize(size)
    assert(size >= (self.occupancy / self.max_occupancy_rate))
    local old_entries = self.entries
    local old_size = self.size
 
+   local byte_size = size * 2 * ffi.sizeof(self.type, 1)
+   local mem, err
+   if try_huge_pages then
+      mem, err = S.mmap(nil, byte_size, 'read, write',
+                              'private, anonymous, hugetlb')
+      if not mem then
+         print("hugetlb mmap failed ("..tostring(err)..'), falling back.')
+         try_use_huge_pages = false
+      end
+   end
+   if not mem then
+      mem, err = S.mmap(nil, byte_size, 'read, write',
+                        'private, anonymous')
+      if not mem then error("mmap failed: " .. tostring(err)) end
+   end
+
    self.size = size
    self.scale = self.size / HASH_MAX
    self.occupancy = 0
    self.max_displacement = 0
-   self.entries = self.type(self.size * 2)
+   self.entries = ffi.cast(ffi.typeof('$*', self.entry_type), mem)
    self.occupancy_hi = floor(self.size * self.max_occupancy_rate)
    self.occupancy_lo = floor(self.size * self.min_occupancy_rate)
    for i=0,self.size*2-1 do self.entries[i].hash = HASH_MAX end
+
+   ffi.gc(self.entries, function (ptr) S.munmap(ptr, byte_size) end)
 
    for i=0,old_size*2-1 do
       if old_entries[i].hash ~= HASH_MAX then
@@ -502,33 +521,23 @@ function selfcheck()
    local stride = 1
    repeat
       local keys, results = rhh:prepare_lookup_bufs(stride)
-   
       local function test_lookup_with_bufs(count)
          local result
-         local top = floor(count/stride)*stride
-         for i = 1, top, stride do
-            for j = 0, stride-1 do
+         for i = 1, count, stride do
+            local n = math.min(stride, count-i+1)
+            for j = 0, n-1 do
                keys[j].hash = hash_i32(i+j)
                keys[j].key = i+j
             end
-            rhh:fill_lookup_bufs(keys, results, stride)
-            for j = 0, stride-1 do
+            rhh:fill_lookup_bufs(keys, results, n)
+            for j = 0, n-1 do
                result = rhh:lookup_from_bufs(keys, results, j)
             end
          end
-         -- Read the tail in a separate loop.  Seems silly.
-         local tail = count - top
-         for j = 0, tail-1 do
-            keys[j].hash = hash_i32(top+1+j)
-            keys[j].key = top+1+j
-         end
-         rhh:fill_lookup_bufs(keys, results, tail)
-         for i = 0, tail - 1 do
-            result = rhh:lookup_from_bufs(keys, results, i)
-         end
          return result
       end
-
+      -- Note that "result" is an index into `results', not the phm, and
+      -- so we expect the results to be different from rhh:lookup().
       assert_cycles_or_ns_le(test_lookup_with_bufs, 1e7, 1000, 100,
                              'lookup, stride='..stride)
       stride = stride * 2
