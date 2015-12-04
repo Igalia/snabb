@@ -165,28 +165,6 @@ function PodHashMap:fill_lookup_bufs(keys, results, stride)
    end
 end
 
-function PodHashMap:lookup_from_bufs(keys, results, i)
-   local max_displacement = self.max_displacement
-   local result = i * (max_displacement + 1)
-
-   -- Fast path for displacement == 0.
-   if results[result].hash == keys[i].hash then
-      if keys[i].key == results[result].key then
-         return result
-      end
-   end
-
-   for result = result+1, result+max_displacement+1 do
-      if results[result].hash > keys[i].hash then return nil end
-      if results[result].hash == keys[i].hash then
-         if keys[i].key == results[result].key then return result end
-      end
-   end
-
-   -- Not found.
-   return nil
-end
-
 function PodHashMap:add(hash, key, value)
    if self.occupancy + 1 > self.size * self.max_occupancy_rate then
       self:resize(self.size * 2)
@@ -233,7 +211,66 @@ function PodHashMap:add(hash, key, value)
    return index
 end
 
-local function lookup_helper(entries, index, hash, other_hash, key)
+local function make_linear_search(max_displacement)
+   local out = { }
+   local indent = ''
+   local function writeln(str) table.insert(out, indent..str..'\n') end
+
+   writeln('return function(entries, index, hash)')
+   indent = indent..'   '
+   writeln('local h')
+   for displacement=0,max_displacement do
+      writeln('h = entries[index].hash')
+      writeln('if h >= hash then return index end')
+      writeln('index = index + 1')
+   end
+   writeln('return index')
+   indent = indent:sub(4)
+   writeln('end')
+   
+   local str = table.concat(out)
+   local name = 'linear_lookup_'..max_displacement
+
+   return assert(loadstring(str, name))()
+end
+
+local function make_binary_search(max_displacement)
+   local out = { }
+   local indent = ''
+   local function writeln(str) table.insert(out, indent..str..'\n') end
+
+   writeln('return function(entries, index, hash)')
+   indent = indent..'   '
+   writeln('local h')
+   local function bisect(min, max)
+      writeln('h = entries[index].hash')
+      writeln('if h == hash then return index end')
+      writeln('if h > hash then return nil end')
+      writeln('index = index + 1')
+   end
+   for displacement=0,max_displacement do
+      writeln('h = entries[index].hash')
+      writeln('if h == hash then return index end')
+      writeln('if h > hash then return nil end')
+      writeln('index = index + 1')
+   end
+   writeln('return nil')
+   indent = indent:sub(4)
+   writeln('end')
+   
+   local str = table.concat(out)
+   local name = 'linear_lookup_'..max_displacement
+
+   return assert(loadstring(str, name))()
+end
+
+function PodHashMap:lookup(hash, key)
+   assert(hash ~= HASH_MAX)
+
+   local entries = self.entries
+   local index = hash_to_index(hash, self.scale)
+   local other_hash = entries[index].hash
+
    if hash == other_hash and key == entries[index].key then
       -- Found!
       return index
@@ -258,61 +295,54 @@ local function lookup_helper(entries, index, hash, other_hash, key)
    return nil
 end
 
-local function make_linear_hash_lookup(max_displacement)
-   local out = { }
-   local indent = ''
-   local function writeln(str) table.insert(out, indent..str..'\n') end
-
-   writeln('return function(entries, index, hash)')
-   indent = indent..'   '
-   writeln('local h')
-   for displacement=0,max_displacement do
-      writeln('h = entries[index].hash')
-      writeln('if h == hash then return index end')
-      writeln('if h > hash then return nil end')
-      writeln('index = index + 1')
-   end
-   writeln('return nil')
-   indent = indent:sub(4)
-   writeln('end')
-   
-   local str = table.concat(out)
-   local name = 'linear_lookup_'..max_displacement
-
-   return assert(loadstring(str, name))()
-end
-
-function PodHashMap:lookup(hash, key)
-   assert(hash ~= HASH_MAX)
-
-   local entries = self.entries
-   local index = hash_to_index(hash, self.scale)
-   local other_hash = entries[index].hash
-
-   return lookup_helper(entries, index, hash, other_hash, key)
-end
-
 local unrolled_lookup_helper
 function PodHashMap:lookup_unrolled(hash, key)
    assert(hash ~= HASH_MAX)
    if not unrolled_lookup_helper then
-      unrolled_lookup_helper = make_linear_hash_lookup(self.max_displacement)
+      unrolled_lookup_helper = make_linear_search(self.max_displacement)
    end
 
    local entries = self.entries
    local index = hash_to_index(hash, self.scale)
 
    local found = unrolled_lookup_helper(entries, index, hash)
-   if not found then return nil end
-   if entries[found].key == key then return found end
-
-   -- Otherwise we have a collision.
-   found = found + 1
-   while entries[found].hash == hash do
+   if entries[found].hash == hash then
+      -- Direct hit?
       if entries[found].key == key then return found end
+      -- Collision?
       found = found + 1
+      while entries[found].hash == hash do
+         if entries[found].key == key then return found end
+         found = found + 1
+      end
    end
 
+   -- Not found.
+   return nil
+end
+
+function PodHashMap:lookup_from_bufs(keys, results, i)
+   if not unrolled_lookup_helper then
+      unrolled_lookup_helper = make_linear_search(self.max_displacement)
+   end
+
+   local entries = results
+   local hash = keys[i].hash
+   local index = i * (self.max_displacement + 1)
+
+   local found = unrolled_lookup_helper(entries, index, hash)
+   if entries[found].hash == hash then
+      -- Direct hit?
+      if entries[found].key == keys[i].key then return found end
+      -- Collision?
+      found = found + 1
+      while entries[found].hash == hash do
+         if entries[found].key == keys[i].key then return found end
+         found = found + 1
+      end
+   end
+
+   -- Not found.
    return nil
 end
 
