@@ -229,7 +229,7 @@ local function make_linear_search(max_displacement)
    writeln('end')
    
    local str = table.concat(out)
-   local name = 'linear_lookup_'..max_displacement
+   local name = 'linear_search_'..max_displacement
 
    return assert(loadstring(str, name))()
 end
@@ -238,28 +238,43 @@ local function make_binary_search(max_displacement)
    local out = { }
    local indent = ''
    local function writeln(str) table.insert(out, indent..str..'\n') end
+   local function push() indent = indent..'   ' end
+   local function pop() indent = indent:sub(4) end
+
+   local function bisect(count)
+      if count == 1 then
+         writeln('return index')
+      else
+         local mid = floor((count - 1)/2)
+         local plus_mid = ''
+         if mid ~= 0 then plus_mid = ' + '..mid end
+         writeln('if entries[index'..plus_mid..'].hash < hash then')
+         push()
+         local inc = mid + 1
+         local next_index = 'index + '..inc
+         if inc + 1 == count then
+            writeln('return '..next_index)
+         else
+            writeln('index = '..next_index)
+            bisect(count - inc)
+         end
+         pop()
+         writeln('else')
+         push()
+         bisect(mid + 1)
+         pop()
+         writeln('end')
+      end
+   end
 
    writeln('return function(entries, index, hash)')
-   indent = indent..'   '
-   writeln('local h')
-   local function bisect(min, max)
-      writeln('h = entries[index].hash')
-      writeln('if h == hash then return index end')
-      writeln('if h > hash then return nil end')
-      writeln('index = index + 1')
-   end
-   for displacement=0,max_displacement do
-      writeln('h = entries[index].hash')
-      writeln('if h == hash then return index end')
-      writeln('if h > hash then return nil end')
-      writeln('index = index + 1')
-   end
-   writeln('return nil')
-   indent = indent:sub(4)
+   push()
+   bisect(max_displacement + 1)
+   pop()
    writeln('end')
    
    local str = table.concat(out)
-   local name = 'linear_lookup_'..max_displacement
+   local name = 'binary_search_'..max_displacement
 
    return assert(loadstring(str, name))()
 end
@@ -299,7 +314,7 @@ local unrolled_lookup_helper
 function PodHashMap:lookup_unrolled(hash, key)
    assert(hash ~= HASH_MAX)
    if not unrolled_lookup_helper then
-      unrolled_lookup_helper = make_linear_search(self.max_displacement)
+      unrolled_lookup_helper = make_binary_search(self.max_displacement)
    end
 
    local entries = self.entries
@@ -323,7 +338,7 @@ end
 
 function PodHashMap:lookup_from_bufs(keys, results, i)
    if not unrolled_lookup_helper then
-      unrolled_lookup_helper = make_linear_search(self.max_displacement)
+      unrolled_lookup_helper = make_binary_search(self.max_displacement)
    end
 
    local entries = results
