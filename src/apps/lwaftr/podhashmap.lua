@@ -158,6 +158,13 @@ function PodHashMap:fill_lookup_buf(hash, dst, offset, width)
    ffi.copy(dst + offset, entries + start_index, unit_size * width)
 end
 
+function PodHashMap:prepare_lookup(keys, results, i, hash, key)
+   keys[i].hash = hash
+   keys[i].key = key
+   local width = self.max_displacement + 1
+   self:fill_lookup_buf(hash, results, i * width, width)
+end
+
 function PodHashMap:fill_lookup_bufs(keys, results, stride)
    local width = self.max_displacement + 1
    for i=0,stride-1 do
@@ -626,10 +633,8 @@ function selfcheck()
          for i = 1, count, stride do
             local n = math.min(stride, count-i+1)
             for j = 0, n-1 do
-               keys[j].hash = hash_i32(i+j)
-               keys[j].key = i+j
+               rhh:prepare_lookup(keys, results, j, hash_i32(i+j), i+j)
             end
-            rhh:fill_lookup_bufs(keys, results, n)
             for j = 0, n-1 do
                result = rhh:lookup_from_bufs(keys, results, j)
             end
