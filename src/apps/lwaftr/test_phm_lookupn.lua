@@ -26,8 +26,10 @@ local function run(params)
    for i = 1, count, stride do
       local n = math.min(stride, count + 1 - i)
       for j = 0, n-1 do
-         rhh:prepare_lookup(keys, results, j, hash_i32(i+j), i+j)
+         keys[j].hash = hash_i32(i+j)
+         keys[j].key = i+j
       end
+      rhh:fill_lookup_bufs(keys, results, n)
       for j = 0, n-1 do
          local result = rhh:lookup_from_bufs(keys, results, j)
       --   assert(result, i+j)
