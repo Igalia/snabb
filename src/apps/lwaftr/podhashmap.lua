@@ -158,11 +158,25 @@ function PodHashMap:fill_lookup_buf(hash, dst, offset, width)
    ffi.copy(dst + offset, entries + start_index, unit_size * width)
 end
 
+local prepare_lookup_helper = nil
+function PodHashMap:make_prepare_lookup_helper()
+   local entries = self.entries
+   local unit_size = ffi.sizeof(self.entry_type)
+   local scale = self.scale
+   local width = self.max_displacement + 1
+   local bytes_to_copy = unit_size * width
+   return function(hash, dst, offset)
+      local start_index = hash_to_index(hash, scale)
+      ffi.copy(dst + offset*width, entries + start_index, bytes_to_copy)
+   end
+end
 function PodHashMap:prepare_lookup(keys, results, i, hash, key)
+   if not prepare_lookup_helper then
+      prepare_lookup_helper = self:make_prepare_lookup_helper()
+   end
    keys[i].hash = hash
    keys[i].key = key
-   local width = self.max_displacement + 1
-   self:fill_lookup_buf(hash, results, i * width, width)
+   prepare_lookup_helper(hash, results, i)
 end
 
 function PodHashMap:fill_lookup_bufs(keys, results, stride)
