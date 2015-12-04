@@ -282,7 +282,7 @@ end
 function PodHashMap:make_binary_search_dasm()
    local gen = require('apps.lwaftr.binary_search').make_binary_search
    return gen(self.max_displacement + 1,
-              ffi.sizeof(self.entry_type))
+              ffi.sizeof(self.type, 1))
 end
 
 function PodHashMap:lookup(hash, key)
@@ -326,7 +326,7 @@ function PodHashMap:lookup_unrolled(hash, key)
    local entries = self.entries
    local index = hash_to_index(hash, self.scale)
 
-   local found = unrolled_lookup_helper(entries + index, hash)
+   local found = index + unrolled_lookup_helper(entries + index, hash)
    if entries[found].hash == hash then
       -- Direct hit?
       if entries[found].key == key then return found end
@@ -351,7 +351,7 @@ function PodHashMap:lookup_from_bufs(keys, results, i)
    local hash = keys[i].hash
    local index = i * (self.max_displacement + 1)
 
-   local found = unrolled_lookup_helper(entries + index, hash)
+   local found = index + unrolled_lookup_helper(entries + index, hash)
    if entries[found].hash == hash then
       -- Direct hit?
       if entries[found].key == keys[i].key then return found end
