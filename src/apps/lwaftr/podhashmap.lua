@@ -505,7 +505,7 @@ function murmur_hash_i32(i32)
    return i32 - INT32_MIN
 end
 
-function selfcheck()
+function selftest()
    local pmu = require('lib.pmu')
    local has_pmu_counters, err = pmu.is_available()
    if not has_pmu_counters then
