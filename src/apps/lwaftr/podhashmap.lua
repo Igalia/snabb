@@ -258,6 +258,30 @@ local function lookup_helper(entries, index, hash, other_hash, key)
    return nil
 end
 
+local function make_linear_hash_lookup(max_displacement)
+   local out = { }
+   local indent = ''
+   local function writeln(str) table.insert(out, indent..str..'\n') end
+
+   writeln('return function(entries, index, hash)')
+   indent = indent..'   '
+   writeln('local h')
+   for displacement=0,max_displacement do
+      writeln('h = entries[index].hash')
+      writeln('if h == hash then return index end')
+      writeln('if h > hash then return nil end')
+      writeln('index = index + 1')
+   end
+   writeln('return nil')
+   indent = indent:sub(4)
+   writeln('end')
+   
+   local str = table.concat(out)
+   local name = 'linear_lookup_'..max_displacement
+
+   return assert(loadstring(str, name))()
+end
+
 function PodHashMap:lookup(hash, key)
    assert(hash ~= HASH_MAX)
 
@@ -266,6 +290,30 @@ function PodHashMap:lookup(hash, key)
    local other_hash = entries[index].hash
 
    return lookup_helper(entries, index, hash, other_hash, key)
+end
+
+local unrolled_lookup_helper
+function PodHashMap:lookup_unrolled(hash, key)
+   assert(hash ~= HASH_MAX)
+   if not unrolled_lookup_helper then
+      unrolled_lookup_helper = make_linear_hash_lookup(self.max_displacement)
+   end
+
+   local entries = self.entries
+   local index = hash_to_index(hash, self.scale)
+
+   local found = unrolled_lookup_helper(entries, index, hash)
+   if not found then return nil end
+   if entries[found].key == key then return found end
+
+   -- Otherwise we have a collision.
+   found = found + 1
+   while entries[found].hash == hash do
+      if entries[found].key == key then return found end
+      found = found + 1
+   end
+
+   return nil
 end
 
 function PodHashMap:prefetch(hash)
@@ -411,44 +459,43 @@ function selfcheck()
    local has_pmu_counters, err = pmu.is_available()
    if not has_pmu_counters then
       print('No PMU available: '..err)
-      print('Measuring nanoseconds instead of cycles.')
    end
 
-   local function count_cycles(f, iterations)
-      pmu.setup({"ref_cycles"})
-      local set = pmu.new_counter_set()
-      pmu.switch_to(set)
-      local res = f(iterations)
-      pmu.switch_to(nil)
-      return pmu.to_table(set).ref_cycles, res
-   end
+   if has_pmu_counters then pmu.setup() end
 
-   local function count_ns(f, iterations)
+   local function measure(f, iterations)
+      local set
+      if has_pmu_counters then set = pmu.new_counter_set() end
       local start = C.get_time_ns()
+      if has_pmu_counters then pmu.switch_to(set) end
       local res = f(iterations)
+      if has_pmu_counters then pmu.switch_to(nil) end
       local stop = C.get_time_ns()
-      return tonumber(stop-start), res
+      local ns = tonumber(stop-start)
+      local cycles = nil
+      if has_pmu_counters then cycles = pmu.to_table(set).cycles end
+      return cycles, ns, res
    end
 
-   local function check_perf(f, iterations, max, measure, unit, what)
+   local function check_perf(f, iterations, max_cycles, max_ns, what)
+      require('jit').flush()
       io.write(tostring(what or f)..': ')
       io.flush()
-      local total, res = measure(f, iterations)
-      local per_iteration = total / iterations
-      io.write(per_iteration..' '..unit..'/iteration (result: '..tostring(res)..')\n')
-      if per_iteration > max then
-         error('perfmark failed: exceeded maximum '..max)
+      local cycles, ns, res = measure(f, iterations)
+      if cycles then
+         cycles = cycles/iterations
+         io.write(('%.2f cycles, '):format(cycles))
+      end
+      ns = ns/iterations
+      io.write(('%.2f ns per iteration (result: %s)\n'):format(
+            ns, tostring(res)))
+      if cycles and cycles > max_cycles then
+         print('WARNING: perfmark failed: exceeded maximum cycles '..max_cycles)
+      end
+      if ns > max_ns then
+         print('WARNING: perfmark failed: exceeded maximum ns '..max_ns)
       end
       return res
-   end
-
-   local function assert_cycles_or_ns_le(f, iterations, cycles, ns, what)
-      require('jit').flush()
-      if has_pmu_counters then
-         return check_perf(f, iterations, cycles, count_cycles, 'cycles', what)
-      else
-         return check_perf(f, iterations, ns, count_ns, 'ns', what)
-      end
    end
 
    local function test_jenkins(iterations)
@@ -463,8 +510,8 @@ function selfcheck()
       return result
    end
 
-   assert_cycles_or_ns_le(test_jenkins, 1e8, 15, 4, 'jenkins hash')
-   assert_cycles_or_ns_le(test_murmur, 1e8, 30, 8, 'murmur hash (32 bit)')
+   check_perf(test_jenkins, 1e8, 15, 4, 'jenkins hash')
+   check_perf(test_murmur, 1e8, 30, 8, 'murmur hash (32 bit)')
 
    local rhh = PodHashMap.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t'))
    rhh:resize(1e7 / 0.4 + 1)
@@ -485,6 +532,14 @@ function selfcheck()
       return result
    end
 
+   local function test_lookup_unrolled(count)
+      local result
+      for i = 1, count do
+         result = rhh:lookup_unrolled(hash_i32(i), i)
+      end
+      return result
+   end
+
    local function test_lookup_with_2x_prefetch(count)
       local r1, r2
       for i = 1, count, 2 do
@@ -496,8 +551,7 @@ function selfcheck()
       return r2
    end
 
-   assert_cycles_or_ns_le(test_insertion, 1e7, 400, 100,
-                          'insertion (40% occupancy)')
+   check_perf(test_insertion, 1e7, 400, 100, 'insertion (40% occupancy)')
    print('max displacement: '..rhh.max_displacement)
    io.write('selfcheck: ')
    io.flush()
@@ -513,10 +567,11 @@ function selfcheck()
    rhh:selfcheck(hash_i32)
    io.write('pass\n')
 
-   assert_cycles_or_ns_le(test_lookup, 1e7, 300, 100,
-                          'lookup (40% occupancy)')
-   assert_cycles_or_ns_le(test_lookup_with_2x_prefetch, 1e7, 300, 100,
-                          'lookup with 2x prefetch (40% occupancy)')
+   check_perf(test_lookup, 1e7, 300, 100, 'lookup (40% occupancy)')
+   check_perf(test_lookup_unrolled, 1e7, 300, 100,
+              'lookup unrolled (40% occupancy)')
+   check_perf(test_lookup_with_2x_prefetch, 1e7, 300, 100,
+              'lookup with 2x prefetch (40% occupancy)')
 
    local stride = 1
    repeat
@@ -538,8 +593,12 @@ function selfcheck()
       end
       -- Note that "result" is an index into `results', not the phm, and
       -- so we expect the results to be different from rhh:lookup().
-      assert_cycles_or_ns_le(test_lookup_with_bufs, 1e7, 1000, 100,
-                             'lookup, stride='..stride)
+      check_perf(test_lookup_with_bufs, 1e7, 1000, 100,
+                 'lookup, stride='..stride)
       stride = stride * 2
    until stride > 256
+
+   check_perf(test_lookup, 1e7, 300, 100, 'lookup (40% occupancy)')
+   check_perf(test_lookup_unrolled, 1e7, 300, 100,
+              'lookup unrolled (40% occupancy)')
 end
