@@ -6,6 +6,7 @@ local phm = require("apps.lwaftr.podhashmap").PodHashMap
 
 -- e.g. ./snabb snsh apps/lwaftr/phmtest.lua
 local function run(params)
+   require("apps.lwaftr.binary_search").selftest()
    require("apps.lwaftr.podhashmap").selfcheck()
 
    print('insertion rate test (40% occupancy)')
