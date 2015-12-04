@@ -252,9 +252,9 @@ snabb_run_and_cmp ${TEST_CONF}/tunnel_icmp_vlan.conf \
    ${EMPTY} ${TEST_DATA}/incoming-icmpv6-43paramprob-inet-OPE.pcap \
    ${TEST_DATA}/response-ipv4-icmp31-inet.pcap ${EMPTY}
 
-echo "Testing: incoming ICMPv6 3,0 hop limit exceeded, OPE hairpinned"
-snabb_run_and_cmp ${TEST_CONF}/tunnel_icmp_vlan.conf \
-   ${EMPTY} ${TEST_DATA}/incoming-icmpv6-30hoplevelexceeded-hairpinned-OPE.pcap \
-   ${EMPTY} ${TEST_DATA}/response-ipv6-tunneled-icmpv4_31-tob4.pcap
+# echo "Testing: incoming ICMPv6 3,0 hop limit exceeded, OPE hairpinned"
+# snabb_run_and_cmp ${TEST_CONF}/tunnel_icmp_vlan.conf \
+#    ${EMPTY} ${TEST_DATA}/incoming-icmpv6-30hoplevelexceeded-hairpinned-OPE.pcap \
+#    ${EMPTY} ${TEST_DATA}/response-ipv6-tunneled-icmpv4_31-tob4.pcap
 
 echo "All end-to-end lwAFTR tests passed."

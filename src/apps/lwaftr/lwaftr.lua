@@ -232,9 +232,19 @@ local function decrement_ttl(lwstate, pkt)
 end
 
 local function get_lwAFTR_ipv6(lwstate, binding_entry)
-   local lwaftr_ipv6 = binding_entry[5]
+   local lwaftr_ipv6 = binding_entry[4]
    if not lwaftr_ipv6 then lwaftr_ipv6 = lwstate.aftr_ipv6_ip end
    return lwaftr_ipv6
+end
+
+local function port_to_psid(port, M, R)
+   return math.floor(port/M) % R
+end
+
+local function in_range(port, psid_params)
+   local psid, offset, length = psid_params[1], psid_params[2], psid_params[3]
+   local m = 16 - (offset + length)
+   return port_to_psid(port, 2^m, 2^length) == psid
 end
 
 -- TODO: make this O(1), and seriously optimize it for cache lines
@@ -247,7 +257,7 @@ local function binding_lookup_ipv4(lwstate, ipv4_ip, port)
       local bind = lwstate.binding_table[i]
       if debug then print("CHECK", string.format("%x, %x", bind[2], ipv4_ip)) end
       if bind[2] == ipv4_ip then
-         if port >= bind[3] and port <= bind[4] then
+         if in_range(port, bind[3]) then
             local lwaftr_ipv6 = get_lwAFTR_ipv6(lwstate, bind)
             return bind[1], lwaftr_ipv6
          end
@@ -297,7 +307,7 @@ local function in_binding_table(lwstate, ipv6_src_ip, ipv6_dst_ip, ipv4_src_ip, 
          print("CHECKB4", string.format("%x, %x", bind[2], ipv4_src_ip), ipv4_src_port)
       end
       if bind[2] == ipv4_src_ip then
-         if ipv4_src_port >= bind[3] and ipv4_src_port <= bind[4] then
+         if in_range(ipv4_src_port, bind[3]) then
             if debug then
                print("ipv6bind")
                lwdebug.print_ipv6(bind[1])

@@ -33,30 +33,44 @@ end
 local machine_friendly_binding_table
 
 -- b4_v6 is for the B4, br_v6 is for the border router (lwAFTR)
+-- Entry format: {b4_v6, v4, { psid }, br_v6}
 local function pton_binding_table(bt)
    local pbt = {}
+   local inserted = {}
    for _, v in ipairs(bt) do
-      local b4_v6 = ipv6:pton(v[1])
-      local pv4 = lwutil.rd32(ipv4:pton(v[2]))
+      local b4_v6, pv4, psid, br_v6 = unpack(v)
+      local offset, length = psid[2], psid[3]
+      pv4 = lwutil.rd32(ipv4:pton(pv4))
+      if inserted[pv4] then
+         local entry = inserted[pv4]
+         assert(offset == entry.offset and length == entry.length, 
+            "There are at least two entries with the same IPv4 address but "..
+            "with different PSID offset and PSID length")
+      end
+      if not inserted[pv4] then
+         inserted[pv4] = {offset = offset, length = length}
+      end
+      b4_v6 = ipv6:pton(b4_v6)
       local pentry
-      if v[5] then
-         local br_v6 = ipv6:pton(v[5])
-         pentry = {b4_v6, pv4, v[3], v[4], br_v6}
+      if br_v6 then
+         pentry = {b4_v6, pv4, psid, ipv6:pton(br_v6)}
       else
-         pentry = {b4_v6, pv4, v[3], v[4]}
+         pentry = {b4_v6, pv4, psid}
       end
       table.insert(pbt, pentry)
    end
    return pbt
 end
 
-function load_binding_table(bt_file)
-   if not bt_file then
-      error("bt_file must be specified or the BT pre-initialized")
-   end
+local function to_machine_friendly(bt_file)
    local binding_table = read_binding_table(bt_file)
    machine_friendly_binding_table = pton_binding_table(binding_table)
    return machine_friendly_binding_table
+end
+
+function load_binding_table(bt_file)
+   assert(bt_file, "bt_file must be specified or the BT pre-initialized")
+   return to_machine_friendly(bt_file)
 end
 
 function get_binding_table(bt_file)
