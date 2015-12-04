@@ -279,6 +279,12 @@ local function make_binary_search(max_displacement)
    return assert(loadstring(str, name))()
 end
 
+function PodHashMap:make_binary_search_dasm()
+   local gen = require('apps.lwaftr.binary_search').make_binary_search
+   return gen(self.max_displacement + 1,
+              ffi.sizeof(self.entry_type))
+end
+
 function PodHashMap:lookup(hash, key)
    assert(hash ~= HASH_MAX)
 
@@ -314,13 +320,13 @@ local unrolled_lookup_helper
 function PodHashMap:lookup_unrolled(hash, key)
    assert(hash ~= HASH_MAX)
    if not unrolled_lookup_helper then
-      unrolled_lookup_helper = make_binary_search(self.max_displacement)
+      unrolled_lookup_helper = self:make_binary_search_dasm()
    end
 
    local entries = self.entries
    local index = hash_to_index(hash, self.scale)
 
-   local found = unrolled_lookup_helper(entries, index, hash)
+   local found = unrolled_lookup_helper(entries + index, hash)
    if entries[found].hash == hash then
       -- Direct hit?
       if entries[found].key == key then return found end
@@ -338,14 +344,14 @@ end
 
 function PodHashMap:lookup_from_bufs(keys, results, i)
    if not unrolled_lookup_helper then
-      unrolled_lookup_helper = make_binary_search(self.max_displacement)
+      unrolled_lookup_helper = self:make_binary_search_dasm()
    end
 
    local entries = results
    local hash = keys[i].hash
    local index = i * (self.max_displacement + 1)
 
-   local found = unrolled_lookup_helper(entries, index, hash)
+   local found = unrolled_lookup_helper(entries + index, hash)
    if entries[found].hash == hash then
       -- Direct hit?
       if entries[found].key == keys[i].key then return found end

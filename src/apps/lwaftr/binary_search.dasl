@@ -112,6 +112,10 @@ function selftest ()
       assert_search(i, 6, i - 1)
    end
 
+   for i=2,10 do
+      assert_search(i, 2, 1)
+   end
+
    for i=4,10 do
       assert_search(i, 3, 3)
    end
