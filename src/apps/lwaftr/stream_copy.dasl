@@ -63,6 +63,7 @@ function make_streaming_copy(bytes)
          | vzeroall
       end
       
+      -- FIXME: use vmaskmovdqu instead.
       -- bytes is in the range [0,31].
       while bytes >= 8 do
          local count = 0

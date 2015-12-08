@@ -148,6 +148,34 @@ function PodHashMap:resize(size)
    end
 end
 
+function StreamingLookup:make_unrolled_stream_results()
+   local out = { }
+   local indent = ''
+   local function writeln(str) table.insert(out, indent..str..'\n') end
+
+   writeln('return function(self)')
+   indent = indent..'   '
+   local entries_per_lookup = self.entries_per_lookup
+   writeln('local entries = self.entries')
+   writeln('local scale = self.scale')
+   writeln('local dst = self.results')
+   writeln('local keys = self.keys')
+   writeln('local copy = self.streaming_copy')
+   writeln('local index')
+
+   for i=0,self.stride-1 do
+      writeln('index = math.floor(keys['..i..'].hash*scale + 0.5)')
+      writeln('copy(dst + '..(i * entries_per_lookup)..', entries + index)')
+   end
+   indent = indent:sub(4)
+   writeln('end')
+   
+   local str = table.concat(out)
+   local name = 'unrolled_stream_results_'..self.stride
+
+   return assert(loadstring(str, name))()
+end
+
 function PodHashMap:prepare_streaming_lookup(stride)
    local res = {
       entries = self.entries,
@@ -642,6 +670,7 @@ function selftest()
    local stride = 1
    repeat
       local stream = rhh:prepare_streaming_lookup(stride)
+      stream.stream_results = stream:make_unrolled_stream_results()
       local function test_streaming_lookup(count)
          local result
          for i = 1, count, stride do
