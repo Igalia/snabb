@@ -157,15 +157,12 @@ function StreamingLookup:make_unrolled_stream_results()
    indent = indent..'   '
    local entries_per_lookup = self.entries_per_lookup
    writeln('local entries = self.entries')
-   writeln('local scale = self.scale')
    writeln('local dst = self.results')
-   writeln('local keys = self.keys')
+   writeln('local indices = self.indices')
    writeln('local copy = self.streaming_copy')
-   writeln('local index')
 
    for i=0,self.stride-1 do
-      writeln('index = math.floor(keys['..i..'].hash*scale + 0.5)')
-      writeln('copy(dst + '..(i * entries_per_lookup)..', entries + index)')
+      writeln('copy(dst + '..(i * entries_per_lookup)..', entries + indices['..i..'])')
    end
    indent = indent:sub(4)
    writeln('end')
@@ -183,6 +180,7 @@ function PodHashMap:prepare_streaming_lookup(stride)
       entries_per_lookup = self.max_displacement + 1,
       bytes_per_entry = ffi.sizeof(self.entry_type),
       scale = self.scale,
+      indices = ffi.new('uint32_t['..stride..']'),
       keys = self.type(stride),
       results = self.type(stride * (self.max_displacement + 1))
    }
@@ -195,6 +193,7 @@ end
 
 function StreamingLookup:add_key(i, hash, key)
    assert(i < self.stride)
+   self.indices[i] = hash_to_index(hash, self.scale)
    self.keys[i].hash = hash
    self.keys[i].key = key
 end
@@ -202,12 +201,10 @@ end
 function StreamingLookup:stream_results()
    local entries = self.entries
    local entries_per_lookup = self.entries_per_lookup
-   local scale = self.scale
    local dst = self.results
-   local keys = self.keys
+   local indices = self.indices
    for i=0,self.stride-1 do
-      local index = hash_to_index(keys[i].hash, scale)
-      self.streaming_copy(dst + i * entries_per_lookup, entries + index)
+      self.streaming_copy(dst + i * entries_per_lookup, entries + indices[i])
    end
 end
 
