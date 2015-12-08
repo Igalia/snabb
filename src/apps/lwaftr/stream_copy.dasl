@@ -1,0 +1,137 @@
+-- Copy routines optimized for dependency-less streaming -*- lua -*-
+--
+-- Modern Xeon chips can have up to 74 pending memory loads at once.  The
+-- store buffer is smaller, http://www.realworldtech.com/haswell-cpu/5/.
+
+module(..., package.seeall)
+
+local debug = false
+
+local ffi = require("ffi")
+local C = ffi.C
+
+local dasm = require("dasm")
+
+|.arch x64
+|.actionlist actions
+
+-- Table keeping machine code alive to the GC.
+local anchor = {}
+
+-- Utility: assemble code and optionally dump disassembly.
+local function assemble (name, prototype, generator)
+   local Dst = dasm.new(actions)
+   generator(Dst)
+   local mcode, size = Dst:build()
+   table.insert(anchor, mcode)
+   if debug then
+      print("mcode dump: "..name)
+      dasm.dump(mcode, size)
+   end
+   return ffi.cast(prototype, mcode)
+end
+
+function make_streaming_copy(bytes)
+   local function gen_streaming_copy(Dst)
+      -- dst is rdi and src in rsi.
+      local use_avx2 = false
+      if bytes >= 32 then
+         -- When the processor switches between AVX2 and SSE mode, it has
+         -- to save and restore the upper halves of the YMM registers,
+         -- unless you explicitly zero them out (or use vzeroupper).
+         use_avx2 = true
+         | vzeroall
+      end
+
+      while bytes >= 32 do
+         local count = 0
+         while bytes >= 32 and count < 16 do
+            | vmovdqu ymm(count), [rsi + 32*count]
+            count = count + 1
+            bytes = bytes - 32
+         end
+         for i = 0, count - 1 do
+            | vmovdqu [rdi + 32*i], ymm(i)
+         end
+         | add rsi, 32*count
+         | add rdi, 32*count
+      end
+      -- When the processor switches between AVX2 and SSE mode, it has
+      -- to save the upper halves of the YMM registers, unless you
+      -- explicitly zero them out (or use vzeroupper).
+      if use_avx2 then
+         | vzeroall
+      end
+      
+      -- bytes is in the range [0,31].
+      while bytes >= 8 do
+         local count = 0
+         -- Rq(0) through Rq(3) are rax, rcx, rdx, and rbx.
+         while bytes >= 8 and count < 4 do
+            | mov Rq(count), [rsi + 8*count]
+            count = count + 1
+            bytes = bytes - 8
+         end
+         for i = 0, count - 1 do
+            | mov [rdi + 8*i], Rq(i)
+         end
+         | add rsi, 8*count
+         | add rdi, 8*count
+      end
+
+      if bytes > 0 then
+         | mov rax, [rsi]
+         if bytes >= 4 then
+            | mov [rdi], eax
+            | add rsi, 4
+            | add rdi, 4
+            | shr rax, 32
+            bytes = bytes - 4
+         end
+         if bytes >= 2 then
+            | mov [rdi], ax
+            | add rsi, 2
+            | add rdi, 2
+            | shr rax, 16
+            bytes = bytes - 2
+         end
+         if bytes == 1 then
+            | mov [rdi], al
+         end
+      end
+
+      | ret
+   end
+   return assemble("streaming_copy_"..bytes, "void(*)(void*, void*)",
+                   gen_streaming_copy)
+end
+
+function selftest ()
+   print("selftest: stream_copy")
+   local src = ffi.new('uint8_t[78]',
+                       { 1,
+                         2, 2,
+                         3, 3, 3,
+                         4, 4, 4, 4,
+                         5, 5, 5, 5, 5, -- o/~ golden rings o/~
+                         6, 6, 6, 6, 6, 6,
+                         7, 7, 7, 7, 7, 7, 7,
+                         8, 8, 8, 8, 8, 8, 8, 8,
+                         9, 9, 9, 9, 9, 9, 9, 9, 9,
+                         10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+                         11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
+                         12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12 })
+   local dst = ffi.new('uint8_t[100]')
+
+   for size=0,78 do
+      local copy = make_streaming_copy(size)
+      for offset=0,77-size do
+         ffi.C.memset(dst, 0, 100)
+         copy(dst, src + offset)
+         for i=0,size-1 do assert(dst[i] == src[offset+i]) end
+         for i=size,99 do assert(dst[i] == 0) end
+      end
+   end
+
+   print("selftest: ok")
+end
