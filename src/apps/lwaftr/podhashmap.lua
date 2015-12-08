@@ -55,7 +55,7 @@ function PodHashMap.new(entry_or_key_type, maybe_value_type)
 end
 
 function PodHashMap:save(filename)
-   local fd, err = S.open(filename, "creat, wronly")
+   local fd, err = S.open(filename, "creat, wronly", "rusr, wusr, rgrp, roth")
    if not fd then
       error("error saving hash table, while creating "..filename..": "..tostring(err))
    end
@@ -74,7 +74,7 @@ function PodHashMap:save(filename)
 end
 
 function PodHashMap:load(filename)
-   local fd, err = S.open(filename, "rdwr")
+   local fd, err = S.open(filename, "rdonly")
    if not fd then
       error("error opening saved hash table ("..filename.."): "..tostring(err))
    end

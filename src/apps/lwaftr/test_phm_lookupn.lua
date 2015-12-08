@@ -16,7 +16,7 @@ local function run(params)
    print('loading saved file '..filename)
    rhh:load(filename)
 
-   local keys, results = rhh:prepare_lookup_bufs(stride)
+   local stream = rhh:prepare_streaming_lookup(stride)
 
    print('max displacement: '..rhh.max_displacement)
 
@@ -26,12 +26,11 @@ local function run(params)
    for i = 1, count, stride do
       local n = math.min(stride, count + 1 - i)
       for j = 0, n-1 do
-         keys[j].hash = hash_i32(i+j)
-         keys[j].key = i+j
+         stream:add_key(j, hash_i32(i+j), i+j)
       end
-      rhh:fill_lookup_bufs(keys, results, n)
+      stream:stream_results()
       for j = 0, n-1 do
-         local result = rhh:lookup_from_bufs(keys, results, j)
+         local result = stream:lookup(j)
       --   assert(result, i+j)
       --   assert(results[result].key == i+j)
       --   assert(results[result].value == bit.bnot(i+j))
