@@ -9,6 +9,7 @@ local tobit, lshift, rshift = bit.tobit, bit.lshift, bit.rshift
 local max, floor = math.max, math.floor
 
 PodHashMap = {}
+StreamingLookup = {}
 
 local HASH_MAX = 0xFFFFFFFF
 local INT32_MIN = -0x80000000
@@ -147,22 +148,60 @@ function PodHashMap:resize(size)
    end
 end
 
-function PodHashMap:prepare_lookup_bufs(stride)
-   return self.type(stride), self.type(stride * (self.max_displacement + 1))
+function PodHashMap:prepare_streaming_lookup(stride)
+   local res = {
+      entries = self.entries,
+      stride = stride,
+      entries_per_lookup = self.max_displacement + 1,
+      bytes_per_entry = ffi.sizeof(self.entry_type),
+      scale = self.scale,
+      keys = self.type(stride),
+      results = self.type(stride * (self.max_displacement + 1))
+   }
+   local gen = require('apps.lwaftr.binary_search').make_binary_search
+   res.binary_search = gen(res.entries_per_lookup, res.bytes_per_entry)
+   return setmetatable(res, { __index = StreamingLookup })
 end
 
-function PodHashMap:fill_lookup_buf(hash, dst, offset, width)
+function StreamingLookup:add_key(i, hash, key)
+   assert(i < self.stride)
+   self.keys[i].hash = hash
+   self.keys[i].key = key
+end
+
+function StreamingLookup:stream_results()
    local entries = self.entries
-   local unit_size = ffi.sizeof(self.entry_type)
-   local start_index = hash_to_index(hash, self.scale)
-   ffi.copy(dst + offset, entries + start_index, unit_size * width)
+   local entries_per_lookup = self.entries_per_lookup
+   local bytes_to_copy = entries_per_lookup * self.bytes_per_entry
+   local scale = self.scale
+   local dst = self.results
+   local keys = self.keys
+   for i=0,self.stride-1 do
+      local index = hash_to_index(keys[i].hash, scale)
+      ffi.copy(dst + i * entries_per_lookup, entries + index, bytes_to_copy)
+   end
 end
 
-function PodHashMap:fill_lookup_bufs(keys, results, stride)
-   local width = self.max_displacement + 1
-   for i=0,stride-1 do
-      self:fill_lookup_buf(keys[i].hash, results, i * width, width)
+function StreamingLookup:lookup(i)
+   local entries = self.results
+   local keys = self.keys
+   local hash = keys[i].hash
+   local index = i * self.entries_per_lookup
+
+   local found = index + self.binary_search(entries + index, hash)
+   if entries[found].hash == hash then
+      -- Direct hit?
+      if entries[found].key == keys[i].key then return found end
+      -- Collision?
+      found = found + 1
+      while entries[found].hash == hash do
+         if entries[found].key == keys[i].key then return found end
+         found = found + 1
+      end
    end
+
+   -- Not found.
+   return nil
 end
 
 function PodHashMap:add(hash, key, value)
@@ -334,31 +373,6 @@ function PodHashMap:lookup_unrolled(hash, key)
       found = found + 1
       while entries[found].hash == hash do
          if entries[found].key == key then return found end
-         found = found + 1
-      end
-   end
-
-   -- Not found.
-   return nil
-end
-
-function PodHashMap:lookup_from_bufs(keys, results, i)
-   if not unrolled_lookup_helper then
-      unrolled_lookup_helper = self:make_binary_search_dasm()
-   end
-
-   local entries = results
-   local hash = keys[i].hash
-   local index = i * (self.max_displacement + 1)
-
-   local found = index + unrolled_lookup_helper(entries + index, hash)
-   if entries[found].hash == hash then
-      -- Direct hit?
-      if entries[found].key == keys[i].key then return found end
-      -- Collision?
-      found = found + 1
-      while entries[found].hash == hash do
-         if entries[found].key == keys[i].key then return found end
          found = found + 1
       end
    end
@@ -626,26 +640,25 @@ function selftest()
 
    local stride = 1
    repeat
-      local keys, results = rhh:prepare_lookup_bufs(stride)
-      local function test_lookup_with_bufs(count)
+      local stream = rhh:prepare_streaming_lookup(stride)
+      local function test_streaming_lookup(count)
          local result
          for i = 1, count, stride do
             local n = math.min(stride, count-i+1)
             for j = 0, n-1 do
-               keys[j].hash = hash_i32(i+j)
-               keys[j].key = i+j
+               stream:add_key(j, hash_i32(i+j), i+j)
             end
-            rhh:fill_lookup_bufs(keys, results, n)
+            stream:stream_results()
             for j = 0, n-1 do
-               result = rhh:lookup_from_bufs(keys, results, j)
+               result = stream:lookup(j)
             end
          end
          return result
       end
       -- Note that "result" is an index into `results', not the phm, and
       -- so we expect the results to be different from rhh:lookup().
-      check_perf(test_lookup_with_bufs, 1e7, 1000, 100,
-                 'lookup, stride='..stride)
+      check_perf(test_streaming_lookup, 1e7, 1000, 100,
+                 'streaming lookup, stride='..stride)
       stride = stride * 2
    until stride > 256
 
