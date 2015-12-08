@@ -1,0 +1,202 @@
+-- Copy routines optimized for dependency-less slurping -*- lua -*-
+--
+-- Modern Xeon chips can have up to 74 pending memory loads at once.  The
+-- store buffer is smaller, http://www.realworldtech.com/haswell-cpu/5/.
+
+module(..., package.seeall)
+
+local debug = false
+
+local ffi = require("ffi")
+local C = ffi.C
+
+local dasm = require("dasm")
+
+|.arch x64
+|.actionlist actions
+
+-- Table keeping machine code alive to the GC.
+local anchor = {}
+
+-- Utility: assemble code and optionally dump disassembly.
+local function assemble (name, prototype, generator)
+   local Dst = dasm.new(actions)
+   generator(Dst)
+   local mcode, size = Dst:build()
+   table.insert(anchor, mcode)
+   if debug then
+      print("mcode dump: "..name)
+      dasm.dump(mcode, size)
+   end
+   return ffi.cast(prototype, mcode)
+end
+
+function make_slurping_copy(stride, entry_count, entry_byte_size)
+   local bytes = entry_count * entry_byte_size
+   local function gen_slurping_copy(Dst)
+      -- dst in rdi
+      -- src in rsi
+      -- indices in rdx
+
+      | vzeroall
+      -- Fetch up to 4 keys at once; what the hell.
+      while stride > 0 do
+         -- Load indices, convert to pointers.
+         for i = 0, math.min(stride, 4)-1 do
+            | xor eax, eax
+            | mov eax, [rdx]
+            -- mul outputs to rdx:rax; save rdx.
+            | mov rcx, rdx
+            | mov rdx, entry_byte_size
+            | mul rdx
+            | mov rdx, rcx
+            | add rdx, 4
+            -- r8 through r11 are temporaries.
+            -- dynasm refuses to assemble Rq(n) if n is >= 8.  FML.
+            -- | lea Rq(8+i), [rsi + rax]
+            if i == 0 then
+               | lea r8, [rsi+rax]
+            elseif i == 1 then
+               | lea r9, [rsi+rax]
+            elseif i == 2 then
+               | lea r10, [rsi+rax]
+            elseif i == 3 then
+               | lea r11, [rsi+rax]
+            else error(i) end
+         end
+         local to_copy = bytes
+         while to_copy >= 32 do            
+            for i = 0, math.min(stride, 4)-1 do
+               -- | vmovdqu ymm(i), [Rq(8+i)]
+               -- | add Rq(8+i), 32
+               if i == 0 then
+                  | vmovdqu ymm(i), [r8]
+                  | add r8,32
+               elseif i == 1 then
+                  | vmovdqu ymm(i), [r9]
+                  | add r9,32
+               elseif i == 2 then
+                  | vmovdqu ymm(i), [r10]
+                  | add r10,32
+               elseif i == 3 then
+                  | vmovdqu ymm(i), [r11]
+                  | add r11,32
+               end
+            end
+            for i = 0, math.min(stride, 4)-1 do
+               | vmovdqu [rdi + i*bytes], ymm(i)
+            end
+            | add rdi, 32
+            to_copy = to_copy - 32
+         end
+         while to_copy >= 8 do
+            for i = 0, math.min(stride, 4)-1 do
+               -- | mov rax, [Rq(8+i)]
+               if i == 0 then
+                  | mov rax, [r8]
+               elseif i == 1 then
+                  | mov rax, [r9]
+               elseif i == 2 then
+                  | mov rax, [r10]
+               elseif i == 3 then
+                  | mov rax, [r11]
+               end
+               | mov [rdi + i*bytes], rax
+            end
+            | add rdi, 8
+            to_copy = to_copy - 8
+         end
+         while to_copy >= 4 do
+            for i = 0, math.min(stride, 4)-1 do
+               -- | mov eax, [Rq(8+i)]
+               if i == 0 then
+                  | mov eax, [r8]
+               elseif i == 1 then
+                  | mov eax, [r9]
+               elseif i == 2 then
+                  | mov eax, [r10]
+               elseif i == 3 then
+                  | mov eax, [r11]
+               end
+               | mov [rdi + i*bytes], eax
+            end
+            | add rdi, 4
+            to_copy = to_copy - 4
+         end
+         while to_copy >= 2 do
+            for i = 0, math.min(stride, 4)-1 do
+               -- | mov ax, [Rq(8+i)]
+               if i == 0 then
+                  | mov ax, [r8]
+               elseif i == 1 then
+                  | mov ax, [r9]
+               elseif i == 2 then
+                  | mov ax, [r10]
+               elseif i == 3 then
+                  | mov ax, [r11]
+               end
+               | mov [rdi + i*bytes], ax
+            end
+            | add rdi, 2
+            to_copy = to_copy - 2
+         end
+         if to_copy == 1 then
+            for i = 0, math.min(stride, 4)-1 do
+               -- | mov al, [Rq(8+i)]
+               if i == 0 then
+                  | mov al, [r8]
+               elseif i == 1 then
+                  | mov al, [r9]
+               elseif i == 2 then
+                  | mov al, [r10]
+               elseif i == 3 then
+                  | mov al, [r11]
+               end
+               | mov [rdi + i*bytes], al
+            end
+            | add rdi, 1
+            to_copy = to_copy - 1
+         end
+
+         -- Now rdi has been advanced by BYTES.  Increment for the
+         -- parallel strides.
+         | add rdi, (math.min(stride,4)-1)*bytes
+         
+         stride = stride - 4
+      end
+      | vzeroall
+      | ret
+   end
+   return assemble("slurping_copy_"..bytes, "void(*)(void*, void*, uint32_t*)",
+                   gen_slurping_copy)
+end
+
+function selftest ()
+   print("selftest: slurp_copy")
+   local src = ffi.new('uint8_t[78]',
+                       { 1,
+                         2, 2,
+                         3, 3, 3,
+                         4, 4, 4, 4,
+                         5, 5, 5, 5, 5, -- o/~ golden rings o/~
+                         6, 6, 6, 6, 6, 6,
+                         7, 7, 7, 7, 7, 7, 7,
+                         8, 8, 8, 8, 8, 8, 8, 8,
+                         9, 9, 9, 9, 9, 9, 9, 9, 9,
+                         10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+                         11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
+                         12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12 })
+   local dst = ffi.new('uint8_t[100]')
+
+   for size=0,78 do
+      local copy = make_slurping_copy(size)
+      for offset=0,77-size do
+         ffi.C.memset(dst, 0, 100)
+         copy(dst, src + offset)
+         for i=0,size-1 do assert(dst[i] == src[offset+i]) end
+         for i=size,99 do assert(dst[i] == 0) end
+      end
+   end
+
+   print("selftest: ok")
+end
