@@ -2,6 +2,7 @@ local ffi = require('ffi')
 local bit = require('bit')
 local hash_i32 = require("apps.lwaftr.podhashmap").hash_i32
 local phm = require("apps.lwaftr.podhashmap").PodHashMap
+local pmu = require("lib.pmu")
 
 -- e.g. ./snabb snsh apps/lwaftr/test_phm_lookupn.lua stride filename
 local function run(params)
@@ -17,10 +18,14 @@ local function run(params)
    rhh:load(filename)
 
    local stream = rhh:prepare_streaming_lookup(stride)
+   stream.stream_results = stream:make_unrolled_stream_results()
 
    print('max displacement: '..rhh.max_displacement)
 
    print('lookup1 speed test (hits, uniform distribution)')
+   pmu.setup()
+   local set = pmu.new_counter_set()
+   pmu.switch_to(set)
    local start = ffi.C.get_time_ns()
    local count = rhh.occupancy
    for i = 1, count, stride do
@@ -37,6 +42,8 @@ local function run(params)
       end
    end
    local stop = ffi.C.get_time_ns()
+   pmu.switch_to(nil)
+   pmu.report(set)
    local iter_rate = count/(tonumber(stop-start)/1e9)/1e6
    print(iter_rate..' million lookups per second')
 
