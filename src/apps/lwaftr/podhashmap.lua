@@ -160,6 +160,8 @@ function PodHashMap:prepare_streaming_lookup(stride)
    }
    local gen = require('apps.lwaftr.binary_search').make_binary_search
    res.binary_search = gen(res.entries_per_lookup, res.bytes_per_entry)
+   local gen = require('apps.lwaftr.stream_copy').make_streaming_copy
+   res.streaming_copy = gen(res.entries_per_lookup * res.bytes_per_entry)
    return setmetatable(res, { __index = StreamingLookup })
 end
 
@@ -172,13 +174,12 @@ end
 function StreamingLookup:stream_results()
    local entries = self.entries
    local entries_per_lookup = self.entries_per_lookup
-   local bytes_to_copy = entries_per_lookup * self.bytes_per_entry
    local scale = self.scale
    local dst = self.results
    local keys = self.keys
    for i=0,self.stride-1 do
       local index = hash_to_index(keys[i].hash, scale)
-      ffi.copy(dst + i * entries_per_lookup, entries + index, bytes_to_copy)
+      self.streaming_copy(dst + i * entries_per_lookup, entries + index)
    end
 end
 
