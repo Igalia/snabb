@@ -148,31 +148,6 @@ function PodHashMap:resize(size)
    end
 end
 
-function StreamingLookup:make_unrolled_stream_results()
-   local out = { }
-   local indent = ''
-   local function writeln(str) table.insert(out, indent..str..'\n') end
-
-   writeln('return function(self)')
-   indent = indent..'   '
-   local entries_per_lookup = self.entries_per_lookup
-   writeln('local entries = self.entries')
-   writeln('local dst = self.results')
-   writeln('local indices = self.indices')
-   writeln('local copy = self.streaming_copy')
-
-   for i=0,self.stride-1 do
-      writeln('copy(dst + '..(i * entries_per_lookup)..', entries + indices['..i..'])')
-   end
-   indent = indent:sub(4)
-   writeln('end')
-   
-   local str = table.concat(out)
-   local name = 'unrolled_stream_results_'..self.stride
-
-   return assert(loadstring(str, name))()
-end
-
 function PodHashMap:prepare_streaming_lookup(stride)
    local res = {
       entries = self.entries,
@@ -188,6 +163,11 @@ function PodHashMap:prepare_streaming_lookup(stride)
    res.binary_search = gen(res.entries_per_lookup, res.bytes_per_entry)
    local gen = require('apps.lwaftr.stream_copy').make_streaming_copy
    res.streaming_copy = gen(res.entries_per_lookup * res.bytes_per_entry)
+   local gen = require('apps.lwaftr.slurp_copy').make_slurping_copy
+   local slurp = gen(stride, res.entries_per_lookup, res.bytes_per_entry)
+   res.stream_results = function(self)
+      slurp(self.results, self.entries, self.indices)
+   end
    return setmetatable(res, { __index = StreamingLookup })
 end
 
@@ -667,7 +647,6 @@ function selftest()
    local stride = 1
    repeat
       local stream = rhh:prepare_streaming_lookup(stride)
-      stream.stream_results = stream:make_unrolled_stream_results()
       local function test_streaming_lookup(count)
          local result
          for i = 1, count, stride do
