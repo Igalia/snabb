@@ -149,26 +149,31 @@ function PodHashMap:resize(size)
 end
 
 function PodHashMap:prepare_streaming_lookup(stride)
+   -- These requires are here because they rely on dynasm, which the
+   -- user might not have.  In that case, since they get no benefit from
+   -- streaming lookup, restrict them to the scalar lookup.
+   local binary_search = require('apps.lwaftr.binary_search')
+   local multi_copy = require('apps.lwaftr.multi_copy')
+
    local res = {
       entries = self.entries,
       stride = stride,
       entries_per_lookup = self.max_displacement + 1,
-      bytes_per_entry = ffi.sizeof(self.entry_type),
       scale = self.scale,
       pointers = ffi.new('void*['..stride..']'),
       keys = self.type(stride),
       results = self.type(stride * (self.max_displacement + 1))
    }
+   -- Give res.pointers sensible default values in case the first lookup
+   -- doesn't fill the pointers vector.
    for i = 0, stride-1 do res.pointers[i] = self.entries end
-   local gen = require('apps.lwaftr.binary_search').make_binary_search
-   res.binary_search = gen(res.entries_per_lookup, res.bytes_per_entry)
-   local gen = require('apps.lwaftr.stream_copy').make_streaming_copy
-   --res.streaming_copy = gen(res.entries_per_lookup * res.bytes_per_entry)
-   local gen = require('apps.lwaftr.multi_copy').make_multi_copy
-   local multi_copy = gen(stride, res.entries_per_lookup * res.bytes_per_entry)
-   res.stream_results = function(self)
-      multi_copy(self.results, self.pointers)
-   end
+
+   -- Compile multi-copy and binary-search procedures that are
+   -- specialized for this table and this stride.
+   local entry_size = ffi.sizeof(self.entry_type)
+   res.multi_copy = multi_copy.gen(stride, res.entries_per_lookup * entry_size)
+   res.binary_search = binary_search.gen(res.entries_per_lookup, entry_size)
+
    return setmetatable(res, { __index = StreamingLookup })
 end
 
@@ -180,11 +185,7 @@ function StreamingLookup:add_key(i, hash, key)
 end
 
 function StreamingLookup:stream_results()
-   local entries_per_lookup = self.entries_per_lookup
-   local dst = self.results
-   for i=0,self.stride-1 do
-      self.streaming_copy(dst + i * entries_per_lookup, self.pointers[i])
-   end
+   self.multi_copy(self.results, self.pointers)
 end
 
 function StreamingLookup:lookup(i)
@@ -255,80 +256,6 @@ function PodHashMap:add(hash, key, value)
    return index
 end
 
-local function make_linear_search(max_displacement)
-   local out = { }
-   local indent = ''
-   local function writeln(str) table.insert(out, indent..str..'\n') end
-
-   writeln('return function(entries, index, hash)')
-   indent = indent..'   '
-   writeln('local h')
-   for displacement=0,max_displacement do
-      writeln('h = entries[index].hash')
-      writeln('if h >= hash then return index end')
-      writeln('index = index + 1')
-   end
-   writeln('return index')
-   indent = indent:sub(4)
-   writeln('end')
-   
-   local str = table.concat(out)
-   local name = 'linear_search_'..max_displacement
-
-   return assert(loadstring(str, name))()
-end
-
-local function make_binary_search(max_displacement)
-   local out = { }
-   local indent = ''
-   local function writeln(str) table.insert(out, indent..str..'\n') end
-   local function push() indent = indent..'   ' end
-   local function pop() indent = indent:sub(4) end
-
-   local function bisect(count)
-      if count == 1 then
-         writeln('return index')
-      else
-         local mid = floor((count - 1)/2)
-         local plus_mid = ''
-         if mid ~= 0 then plus_mid = ' + '..mid end
-         writeln('if entries[index'..plus_mid..'].hash < hash then')
-         push()
-         local inc = mid + 1
-         local next_index = 'index + '..inc
-         if inc + 1 == count then
-            writeln('return '..next_index)
-         else
-            writeln('index = '..next_index)
-            bisect(count - inc)
-         end
-         pop()
-         writeln('else')
-         push()
-         bisect(mid + 1)
-         pop()
-         writeln('end')
-      end
-   end
-
-   writeln('return function(entries, index, hash)')
-   push()
-   bisect(max_displacement + 1)
-   pop()
-   writeln('end')
-   
-   local str = table.concat(out)
-   local name = 'binary_search_'..max_displacement
-
-   return assert(loadstring(str, name))()
-end
-
-function PodHashMap:make_binary_search_dasm()
-   local gen = require('apps.lwaftr.binary_search').make_binary_search
-   return gen(self.max_displacement + 1,
-              ffi.sizeof(self.type, 1))
-end
-
 function PodHashMap:lookup(hash, key)
    assert(hash ~= HASH_MAX)
 
@@ -358,36 +285,6 @@ function PodHashMap:lookup(hash, key)
 
    -- Not found.
    return nil
-end
-
-local unrolled_lookup_helper
-function PodHashMap:lookup_unrolled(hash, key)
-   assert(hash ~= HASH_MAX)
-   if not unrolled_lookup_helper then
-      unrolled_lookup_helper = self:make_binary_search_dasm()
-   end
-
-   local entries = self.entries
-   local index = hash_to_index(hash, self.scale)
-
-   local found = index + unrolled_lookup_helper(entries + index, hash)
-   if entries[found].hash == hash then
-      -- Direct hit?
-      if entries[found].key == key then return found end
-      -- Collision?
-      found = found + 1
-      while entries[found].hash == hash do
-         if entries[found].key == key then return found end
-         found = found + 1
-      end
-   end
-
-   -- Not found.
-   return nil
-end
-
-function PodHashMap:prefetch(hash)
-   return self.entries[hash_to_index(hash, self.scale)].hash
 end
 
 -- FIXME: Does NOT shrink max_displacement
@@ -603,25 +500,6 @@ function selftest()
       return result
    end
 
-   local function test_lookup_unrolled(count)
-      local result
-      for i = 1, count do
-         result = rhh:lookup_unrolled(hash_i32(i), i)
-      end
-      return result
-   end
-
-   local function test_lookup_with_2x_prefetch(count)
-      local r1, r2
-      for i = 1, count, 2 do
-         local h1, h2 = hash_i32(i), hash_i32(i+1)
-         rhh:prefetch(h1)
-         rhh:prefetch(h2)
-         r1, r2 = rhh:lookup(h1, i), rhh:lookup(h2, i+1)
-      end
-      return r2
-   end
-
    check_perf(test_insertion, 2e6, 400, 100, 'insertion (40% occupancy)')
    print('max displacement: '..rhh.max_displacement)
    io.write('selfcheck: ')
@@ -639,10 +517,6 @@ function selftest()
    io.write('pass\n')
 
    check_perf(test_lookup, 2e6, 300, 100, 'lookup (40% occupancy)')
-   check_perf(test_lookup_unrolled, 2e6, 300, 100,
-              'lookup unrolled (40% occupancy)')
-   check_perf(test_lookup_with_2x_prefetch, 2e6, 300, 100,
-              'lookup with 2x prefetch (40% occupancy)')
 
    local stride = 1
    repeat
@@ -669,6 +543,4 @@ function selftest()
    until stride > 256
 
    check_perf(test_lookup, 2e6, 300, 100, 'lookup (40% occupancy)')
-   check_perf(test_lookup_unrolled, 2e6, 300, 100,
-              'lookup unrolled (40% occupancy)')
 end

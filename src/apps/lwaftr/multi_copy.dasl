@@ -40,7 +40,7 @@ local function assemble (name, prototype, generator)
    return ffi.cast(prototype, mcode)
 end
 
-function make_multi_copy(count, size)
+function gen(count, size)
    local function gen_multi_copy(Dst)
       -- dst in rdi
       -- src in rsi
@@ -128,7 +128,7 @@ function selftest ()
       for count=1,10 do
          local dst = ffi.new('uint8_t['..100*count..']')
          local srcv = ffi.new('void*['..count..']')
-         local multi_copy = make_multi_copy(count, size)
+         local multi_copy = gen(count, size)
          for offset=0,(78 - size - count)-1 do
             ffi.C.memset(dst, 0, 100*count)
             for i=0,count-1 do srcv[i] = src + offset + i end

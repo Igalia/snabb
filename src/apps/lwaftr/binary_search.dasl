@@ -34,7 +34,7 @@ local function assemble (name, prototype, generator)
    return ffi.cast(prototype, mcode)
 end
 
-function make_binary_search(count, entry_byte_size)
+function gen(count, entry_byte_size)
    local function gen_binary_search(Dst)
       if count == 1 then
          | mov rax, 0
@@ -96,7 +96,7 @@ function selftest ()
    local test = ffi.new('uint32_t[15]',
                         { 1, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5 })
    local searchers = {}
-   for i=1,10 do searchers[i] = make_binary_search(i, 4) end
+   for i=1,10 do searchers[i] = gen(i, 4) end
 
    local function assert_search(size, key, expected)
       local res = searchers[size](test, key)
