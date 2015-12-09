@@ -162,7 +162,7 @@ function PodHashMap:prepare_streaming_lookup(stride)
    local gen = require('apps.lwaftr.binary_search').make_binary_search
    res.binary_search = gen(res.entries_per_lookup, res.bytes_per_entry)
    local gen = require('apps.lwaftr.stream_copy').make_streaming_copy
-   res.streaming_copy = gen(res.entries_per_lookup * res.bytes_per_entry)
+   --res.streaming_copy = gen(res.entries_per_lookup * res.bytes_per_entry)
    local gen = require('apps.lwaftr.slurp_copy').make_slurping_copy
    local slurp = gen(stride, res.entries_per_lookup, res.bytes_per_entry)
    res.stream_results = function(self)
@@ -584,14 +584,15 @@ function selftest()
    check_perf(test_jenkins, 1e8, 15, 4, 'jenkins hash')
    check_perf(test_murmur, 1e8, 30, 8, 'murmur hash (32 bit)')
 
-   local rhh = PodHashMap.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t'))
-   rhh:resize(1e7 / 0.4 + 1)
+   -- 32-byte entries
+   local rhh = PodHashMap.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t[6]'))
+   rhh:resize(2e6 / 0.4 + 1)
 
    local function test_insertion(count)
       for i = 1, count do
          local h = hash_i32(i)
          local v = bnot(i)
-         rhh:add(h, i, v)
+         rhh:add(h, i, ffi.new('int32_t[6]', {v, v, v, v, v, v}))
       end
    end
 
@@ -622,7 +623,7 @@ function selftest()
       return r2
    end
 
-   check_perf(test_insertion, 1e7, 400, 100, 'insertion (40% occupancy)')
+   check_perf(test_insertion, 2e6, 400, 100, 'insertion (40% occupancy)')
    print('max displacement: '..rhh.max_displacement)
    io.write('selfcheck: ')
    io.flush()
@@ -631,17 +632,17 @@ function selftest()
 
    io.write('population check: ')
    io.flush()
-   for i = 1, 1e7 do
+   for i = 1, 2e6 do
       local offset = rhh:lookup(hash_i32(i), i)
-      assert(rhh:val_at(offset) == bnot(i))
+      assert(rhh:val_at(offset)[0] == bnot(i))
    end
    rhh:selfcheck(hash_i32)
    io.write('pass\n')
 
-   check_perf(test_lookup, 1e7, 300, 100, 'lookup (40% occupancy)')
-   check_perf(test_lookup_unrolled, 1e7, 300, 100,
+   check_perf(test_lookup, 2e6, 300, 100, 'lookup (40% occupancy)')
+   check_perf(test_lookup_unrolled, 2e6, 300, 100,
               'lookup unrolled (40% occupancy)')
-   check_perf(test_lookup_with_2x_prefetch, 1e7, 300, 100,
+   check_perf(test_lookup_with_2x_prefetch, 2e6, 300, 100,
               'lookup with 2x prefetch (40% occupancy)')
 
    local stride = 1
@@ -663,12 +664,12 @@ function selftest()
       end
       -- Note that "result" is an index into `results', not the phm, and
       -- so we expect the results to be different from rhh:lookup().
-      check_perf(test_streaming_lookup, 1e7, 1000, 100,
+      check_perf(test_streaming_lookup, 2e6, 1000, 100,
                  'streaming lookup, stride='..stride)
       stride = stride * 2
    until stride > 256
 
-   check_perf(test_lookup, 1e7, 300, 100, 'lookup (40% occupancy)')
-   check_perf(test_lookup_unrolled, 1e7, 300, 100,
+   check_perf(test_lookup, 2e6, 300, 100, 'lookup (40% occupancy)')
+   check_perf(test_lookup_unrolled, 2e6, 300, 100,
               'lookup unrolled (40% occupancy)')
 end

@@ -103,7 +103,6 @@ function make_slurping_copy(stride, entry_count, entry_byte_size)
          if to_copy > 0 then
             assert(to_copy / 4 == math.floor(to_copy / 4),
                    '4-byte alignment required')
-            --- load mask into ymm(4)
             for i = 0, math.min(stride, 4)-1 do
                -- | vpmaskmovd ymm(i), ymm15, [Rq(8+i)]
                -- | add Rq(8+i),to_copy
