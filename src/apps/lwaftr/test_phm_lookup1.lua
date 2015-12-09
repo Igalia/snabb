@@ -8,7 +8,7 @@ local function run(params)
    if #params ~= 1 then error('usage: test_phm_lookup1.lua FILENAME') end
    local filename = unpack(params)
 
-   local rhh = phm.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t'))
+   local rhh = phm.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t[6]'))
 
    print('loading saved file '..filename)
    rhh:load(filename)

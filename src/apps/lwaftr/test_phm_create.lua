@@ -10,13 +10,13 @@ local function run(params)
    count = assert(tonumber(count), "count not a number: "..count)
 
    print('creating uint32->int32 podhashmap with '..count..' entries, 40% occupancy')
-   local rhh = phm.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t'))
+   local rhh = phm.new(ffi.typeof('uint32_t'), ffi.typeof('int32_t[6]'))
    rhh:resize(count / 0.4 + 1)
    local start = ffi.C.get_time_ns()
    for i = 1, count do
       local h = hash_i32(i)
       local v = bit.bnot(i)
-      rhh:add(h, i, v)
+      rhh:add(h, i, ffi.new("int32_t[6]", {v,v,v,v,v,v}))
    end
    local stop = ffi.C.get_time_ns()
    local iter_rate = count/(tonumber(stop-start)/1e9)/1e6
@@ -37,13 +37,14 @@ local function run(params)
       local entry = rhh.entries[i]
       if entry.hash ~= 0xffffffff then
          assert(entry.hash == hash_i32(entry.key))
-         assert(entry.value == bit.bnot(entry.key))
+         assert(entry.value[0] == bit.bnot(entry.key))
+         assert(entry.value[5] == bit.bnot(entry.key))
       end
    end
 
    for i = 1, count do
       local offset = rhh:lookup(hash_i32(i), i)
-      assert(rhh:val_at(offset) == bit.bnot(i))
+      assert(rhh:val_at(offset)[0] == bit.bnot(i))
    end
 
    -- rhh:dump()
