@@ -39,6 +39,17 @@ function make_slurping_copy(stride, entry_count, entry_byte_size)
       -- indices in rdx
 
       | vzeroall
+
+      local tail_size = bytes % 32
+      local tail_mask
+      if tail_size ~= 0 then
+         tail_mask = ffi.new("uint8_t[32]")
+         for i=0,tail_size-1 do tail_mask[i]=255 end
+         table.insert(anchor, tail_mask)
+         | mov rax, tail_mask
+         | vmovdqu ymm15, [rax]
+      end
+
       -- Fetch up to 4 keys at once; what the hell.
       while stride > 0 do
          -- Load indices, convert to pointers.
@@ -89,73 +100,31 @@ function make_slurping_copy(stride, entry_count, entry_byte_size)
             | add rdi, 32
             to_copy = to_copy - 32
          end
-         while to_copy >= 8 do
+         if to_copy > 0 then
+            assert(to_copy / 4 == math.floor(to_copy / 4),
+                   '4-byte alignment required')
+            --- load mask into ymm(4)
             for i = 0, math.min(stride, 4)-1 do
-               -- | mov rax, [Rq(8+i)]
+               -- | vpmaskmovd ymm(i), ymm15, [Rq(8+i)]
+               -- | add Rq(8+i),to_copy
                if i == 0 then
-                  | mov rax, [r8]
+                  | vpmaskmovd ymm(i), ymm15, [r8]
+                  | add r8,to_copy
                elseif i == 1 then
-                  | mov rax, [r9]
+                  | vpmaskmovd ymm(i), ymm15, [r9]
+                  | add r9,to_copy
                elseif i == 2 then
-                  | mov rax, [r10]
+                  | vpmaskmovd ymm(i), ymm15, [r10]
+                  | add r10,to_copy
                elseif i == 3 then
-                  | mov rax, [r11]
+                  | vpmaskmovd ymm(i), ymm15, [r11]
+                  | add r11,to_copy
                end
-               | mov [rdi + i*bytes], rax
             end
-            | add rdi, 8
-            to_copy = to_copy - 8
-         end
-         while to_copy >= 4 do
             for i = 0, math.min(stride, 4)-1 do
-               -- | mov eax, [Rq(8+i)]
-               if i == 0 then
-                  | mov eax, [r8]
-               elseif i == 1 then
-                  | mov eax, [r9]
-               elseif i == 2 then
-                  | mov eax, [r10]
-               elseif i == 3 then
-                  | mov eax, [r11]
-               end
-               | mov [rdi + i*bytes], eax
+               | vpmaskmovd [rdi + i*bytes], ymm(i), ymm15
             end
-            | add rdi, 4
-            to_copy = to_copy - 4
-         end
-         while to_copy >= 2 do
-            for i = 0, math.min(stride, 4)-1 do
-               -- | mov ax, [Rq(8+i)]
-               if i == 0 then
-                  | mov ax, [r8]
-               elseif i == 1 then
-                  | mov ax, [r9]
-               elseif i == 2 then
-                  | mov ax, [r10]
-               elseif i == 3 then
-                  | mov ax, [r11]
-               end
-               | mov [rdi + i*bytes], ax
-            end
-            | add rdi, 2
-            to_copy = to_copy - 2
-         end
-         if to_copy == 1 then
-            for i = 0, math.min(stride, 4)-1 do
-               -- | mov al, [Rq(8+i)]
-               if i == 0 then
-                  | mov al, [r8]
-               elseif i == 1 then
-                  | mov al, [r9]
-               elseif i == 2 then
-                  | mov al, [r10]
-               elseif i == 3 then
-                  | mov al, [r11]
-               end
-               | mov [rdi + i*bytes], al
-            end
-            | add rdi, 1
-            to_copy = to_copy - 1
+            | add rdi, to_copy
          end
 
          -- Now rdi has been advanced by BYTES.  Increment for the
