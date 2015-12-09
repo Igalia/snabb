@@ -17,7 +17,6 @@ local INITIAL_SIZE = 8
 local MAX_OCCUPANCY_RATE = 0.9
 local MIN_OCCUPANCY_RATE = 0.0
 
---- 32 bytes
 local function make_entry_type(key_type, value_type)
    return ffi.typeof([[struct {
          uint32_t hash;
@@ -146,68 +145,6 @@ function PodHashMap:resize(size)
          self:add(old_entries[i].hash, old_entries[i].key, old_entries[i].value)
       end
    end
-end
-
-function PodHashMap:prepare_streaming_lookup(stride)
-   -- These requires are here because they rely on dynasm, which the
-   -- user might not have.  In that case, since they get no benefit from
-   -- streaming lookup, restrict them to the scalar lookup.
-   local binary_search = require('apps.lwaftr.binary_search')
-   local multi_copy = require('apps.lwaftr.multi_copy')
-
-   local res = {
-      entries = self.entries,
-      stride = stride,
-      entries_per_lookup = self.max_displacement + 1,
-      scale = self.scale,
-      pointers = ffi.new('void*['..stride..']'),
-      keys = self.type(stride),
-      results = self.type(stride * (self.max_displacement + 1))
-   }
-   -- Give res.pointers sensible default values in case the first lookup
-   -- doesn't fill the pointers vector.
-   for i = 0, stride-1 do res.pointers[i] = self.entries end
-
-   -- Compile multi-copy and binary-search procedures that are
-   -- specialized for this table and this stride.
-   local entry_size = ffi.sizeof(self.entry_type)
-   res.multi_copy = multi_copy.gen(stride, res.entries_per_lookup * entry_size)
-   res.binary_search = binary_search.gen(res.entries_per_lookup, entry_size)
-
-   return setmetatable(res, { __index = StreamingLookup })
-end
-
-function StreamingLookup:add_key(i, hash, key)
-   assert(i < self.stride)
-   self.pointers[i] = self.entries + hash_to_index(hash, self.scale)
-   self.keys[i].hash = hash
-   self.keys[i].key = key
-end
-
-function StreamingLookup:stream_results()
-   self.multi_copy(self.results, self.pointers)
-end
-
-function StreamingLookup:lookup(i)
-   local entries = self.results
-   local keys = self.keys
-   local hash = keys[i].hash
-   local index = i * self.entries_per_lookup
-
-   local found = index + self.binary_search(entries + index, hash)
-   if entries[found].hash == hash then
-      -- Direct hit?
-      if entries[found].key == keys[i].key then return found end
-      -- Collision?
-      found = found + 1
-      while entries[found].hash == hash do
-         if entries[found].key == keys[i].key then return found end
-         found = found + 1
-      end
-   end
-
-   -- Not found.
-   return nil
 end
 
 function PodHashMap:add(hash, key, value)
@@ -391,6 +328,114 @@ function PodHashMap:dump()
    end
 end
 
+function PodHashMap:prepare_streaming_lookup(stride, hash_fn)
+   -- These requires are here because they rely on dynasm, which the
+   -- user might not have.  In that case, since they get no benefit from
+   -- streaming lookup, restrict them to the scalar lookup.
+   local binary_search = require('apps.lwaftr.binary_search')
+   local multi_copy = require('apps.lwaftr.multi_copy')
+
+   local res = {
+      all_entries = self.entries,
+      stride = stride,
+      hash_fn = hash_fn,
+      entries_per_lookup = self.max_displacement + 1,
+      scale = self.scale,
+      pointers = ffi.new('void*['..stride..']'),
+      entries = self.type(stride),
+      -- Binary search over N elements can return N if no entry was
+      -- found that was greater than or equal to the key.  We would
+      -- have to check the result of binary search to ensure that we
+      -- are reading a value in bounds.  To avoid this, allocate one
+      -- more entry.
+      stream_entries = self.type(stride * (self.max_displacement + 1) + 1)
+   }
+   -- Give res.pointers sensible default values in case the first lookup
+   -- doesn't fill the pointers vector.
+   for i = 0, stride-1 do res.pointers[i] = self.entries end
+
+   -- Initialize the stream_entries to HASH_MAX for sanity.
+   for i = 0, stride * (self.max_displacement + 1) do
+      res.stream_entries[i].hash = HASH_MAX
+   end
+
+   -- Compile multi-copy and binary-search procedures that are
+   -- specialized for this table and this stride.
+   local entry_size = ffi.sizeof(self.entry_type)
+   res.multi_copy = multi_copy.gen(stride, res.entries_per_lookup * entry_size)
+   res.binary_search = binary_search.gen(res.entries_per_lookup, entry_size)
+
+   return setmetatable(res, { __index = StreamingLookup })
+end
+
+function StreamingLookup:add_key(i, hash, key)
+   assert(i < self.stride)
+   self.entries[i].hash = hash
+   self.entries[i].key = key
+end
+
+function StreamingLookup:stream_results()
+   local stride = self.stride
+   local entries = self.entries
+   local pointers = self.pointers
+   local stream_entries = self.stream_entries
+   local entries_per_lookup = self.entries_per_lookup
+
+   for i=0,stride-1 do
+      local hash = self.hash_fn(entries[i].key)
+      local index = hash_to_index(hash, self.scale)
+      entries[i].hash = hash
+      pointers[i] = self.all_entries + index
+   end
+
+   self.multi_copy(stream_entries, pointers)
+
+   -- Copy results into entries.
+   for i=0,stride-1 do
+      local hash = entries[i].hash
+      local index = i * self.entries_per_lookup
+      local offset = self.binary_search(stream_entries + index, hash)
+      local found = index + offset
+      -- It could be that we read one beyond the ENTRIES_PER_LOOKUP
+      -- entries allocated for this key; that's fine.  See note in
+      -- prepare_streaming_lookup.
+      if stream_entries[found].hash == hash then
+         -- Direct hit?
+         if stream_entries[found].key == entries[i].key then
+            entries[i].value = stream_entries[found].value
+         else
+            -- Mark this result as not found unless we prove
+            -- otherwise.
+            entries[i].hash = HASH_MAX
+
+            -- Collision?
+            found = found + 1
+            while stream_entries[found].hash == hash do
+               if stream_entries[found].key == entries[i].key then
+                  -- Yay!  Re-mark this result as found.
+                  entries[i].hash = hash
+                  entries[i].value = stream_entries[found].value
+                  break
+               end
+               found = found + 1
+            end
+         end
+      else
+         -- Not found.
+         entries[i].hash = HASH_MAX
+      end
+   end
+end
+
+function StreamingLookup:is_empty(i)
+   assert(i >= 0 and i < self.stride)
+   return self.entries[i].hash == HASH_MAX
+end
+
+function StreamingLookup:is_found(i)
+   return not self:is_empty(i)
+end
+
 -- One of Bob Jenkins' hashes from
 -- http://burtleburtle.net/bob/hash/integer.html.  Chosen to result
 -- in the least badness as we adapt to int32 bitops.
@@ -520,18 +565,16 @@ function selftest()
 
    local stride = 1
    repeat
-      local stream = rhh:prepare_streaming_lookup(stride)
+      local stream = rhh:prepare_streaming_lookup(stride, hash_i32)
       local function test_streaming_lookup(count)
          local result
          for i = 1, count, stride do
             local n = math.min(stride, count-i+1)
             for j = 0, n-1 do
-               stream:add_key(j, hash_i32(i+j), i+j)
+               stream.entries[j].key = i + j
             end
             stream:stream_results()
-            for j = 0, n-1 do
-               result = stream:lookup(j)
-            end
+            result = stream.entries[n-1].value[0]
          end
          return result
       end
