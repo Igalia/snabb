@@ -78,19 +78,19 @@ function make_slurping_copy(stride, entry_count, entry_byte_size)
             local step = math.min(to_copy/32, 2)
             for j = 0, step-1 do
                for i = 0, count-1 do
-                  -- | vmovntdqa ymm(i), [Rq(8+i)]
+                  -- | vmovdqu ymm(i), [Rq(8+i)]
                   -- | add Rq(8+i), 32
                   if i == 0 then
-                     | vmovntdqa ymm(j*count+i), [r8]
+                     | vmovdqu ymm(j*count+i), [r8]
                      | add r8,32
                   elseif i == 1 then
-                     | vmovntdqa ymm(j*count+i), [r9]
+                     | vmovdqu ymm(j*count+i), [r9]
                      | add r9,32
                   elseif i == 2 then
-                     | vmovntdqa ymm(j*count+i), [r10]
+                     | vmovdqu ymm(j*count+i), [r10]
                      | add r10,32
                   elseif i == 3 then
-                     | vmovntdqa ymm(j*count+i), [r11]
+                     | vmovdqu ymm(j*count+i), [r11]
                      | add r11,32
                   end
                end
