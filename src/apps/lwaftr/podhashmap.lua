@@ -36,13 +36,9 @@ local function hash_to_index(hash, scale)
    return floor(hash*scale + 0.5)
 end
 
-function PodHashMap.new(entry_or_key_type, maybe_value_type)
+function PodHashMap.new(key_type, value_type)
    local phm = {}   
-   if maybe_value_type then
-      phm.entry_type = make_entry_type(entry_or_key_type, maybe_value_type)
-   else
-      phm.entry_type = entry_or_key_type
-   end
+   phm.entry_type = make_entry_type(key_type, value_type)
    phm.type = make_entries_type(phm.entry_type)
    phm.size = 0
    phm.occupancy = 0
