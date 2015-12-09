@@ -17,7 +17,7 @@ local function run(params)
    print('loading saved file '..filename)
    rhh:load(filename)
 
-   local stream = rhh:prepare_streaming_lookup(stride)
+   local streamer = rhh:make_lookup_streamer(stride, hash_i32)
 
    print('max displacement: '..rhh.max_displacement)
 
@@ -27,15 +27,9 @@ local function run(params)
    for i = 1, count, stride do
       local n = math.min(stride, count + 1 - i)
       for j = 0, n-1 do
-         stream:add_key(j, hash_i32(i+j), i+j)
+         streamer.key[j] = i+j
       end
-      stream:stream_results()
-      for j = 0, n-1 do
-         local result = stream:lookup(j)
-      --   assert(result, i+j)
-      --   assert(results[result].key == i+j)
-      --   assert(results[result].value == bit.bnot(i+j))
-      end
+      streamer.stream()
    end
    local stop = ffi.C.get_time_ns()
    local iter_rate = count/(tonumber(stop-start)/1e9)/1e6

@@ -9,7 +9,7 @@ local tobit, lshift, rshift = bit.tobit, bit.lshift, bit.rshift
 local max, floor = math.max, math.floor
 
 PodHashMap = {}
-StreamingLookup = {}
+LookupStreamer = {}
 
 local HASH_MAX = 0xFFFFFFFF
 local INT32_MIN = -0x80000000
@@ -324,7 +324,7 @@ function PodHashMap:dump()
    end
 end
 
-function PodHashMap:prepare_streaming_lookup(stride, hash_fn)
+function PodHashMap:make_lookup_streamer(stride, hash_fn)
    -- These requires are here because they rely on dynasm, which the
    -- user might not have.  In that case, since they get no benefit from
    -- streaming lookup, restrict them to the scalar lookup.
@@ -361,16 +361,16 @@ function PodHashMap:prepare_streaming_lookup(stride, hash_fn)
    res.multi_copy = multi_copy.gen(stride, res.entries_per_lookup * entry_size)
    res.binary_search = binary_search.gen(res.entries_per_lookup, entry_size)
 
-   return setmetatable(res, { __index = StreamingLookup })
+   return setmetatable(res, { __index = LookupStreamer })
 end
 
-function StreamingLookup:add_key(i, hash, key)
+function LookupStreamer:add_key(i, hash, key)
    assert(i < self.stride)
    self.entries[i].hash = hash
    self.entries[i].key = key
 end
 
-function StreamingLookup:stream_results()
+function LookupStreamer:stream()
    local stride = self.stride
    local entries = self.entries
    local pointers = self.pointers
@@ -394,7 +394,7 @@ function StreamingLookup:stream_results()
       local found = index + offset
       -- It could be that we read one beyond the ENTRIES_PER_LOOKUP
       -- entries allocated for this key; that's fine.  See note in
-      -- prepare_streaming_lookup.
+      -- make_lookup_streamer.
       if stream_entries[found].hash == hash then
          -- Direct hit?
          if stream_entries[found].key == entries[i].key then
@@ -423,12 +423,12 @@ function StreamingLookup:stream_results()
    end
 end
 
-function StreamingLookup:is_empty(i)
+function LookupStreamer:is_empty(i)
    assert(i >= 0 and i < self.stride)
    return self.entries[i].hash == HASH_MAX
 end
 
-function StreamingLookup:is_found(i)
+function LookupStreamer:is_found(i)
    return not self:is_empty(i)
 end
 
@@ -561,22 +561,22 @@ function selftest()
 
    local stride = 1
    repeat
-      local stream = rhh:prepare_streaming_lookup(stride, hash_i32)
-      local function test_streaming_lookup(count)
+      local streamer = rhh:make_lookup_streamer(stride, hash_i32)
+      local function test_lookup_streamer(count)
          local result
          for i = 1, count, stride do
             local n = math.min(stride, count-i+1)
             for j = 0, n-1 do
-               stream.entries[j].key = i + j
+               streamer.entries[j].key = i + j
             end
-            stream:stream_results()
-            result = stream.entries[n-1].value[0]
+            streamer:stream()
+            result = streamer.entries[n-1].value[0]
          end
          return result
       end
       -- Note that "result" is an index into `results', not the phm, and
       -- so we expect the results to be different from rhh:lookup().
-      check_perf(test_streaming_lookup, 2e6, 1000, 100,
+      check_perf(test_lookup_streamer, 2e6, 1000, 100,
                  'streaming lookup, stride='..stride)
       stride = stride * 2
    until stride > 256
