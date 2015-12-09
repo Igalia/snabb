@@ -155,10 +155,11 @@ function PodHashMap:prepare_streaming_lookup(stride)
       entries_per_lookup = self.max_displacement + 1,
       bytes_per_entry = ffi.sizeof(self.entry_type),
       scale = self.scale,
-      indices = ffi.new('uint32_t['..stride..']'),
+      pointers = ffi.new('void*['..stride..']'),
       keys = self.type(stride),
       results = self.type(stride * (self.max_displacement + 1))
    }
+   for i = 0, stride-1 do res.pointers[i] = self.entries end
    local gen = require('apps.lwaftr.binary_search').make_binary_search
    res.binary_search = gen(res.entries_per_lookup, res.bytes_per_entry)
    local gen = require('apps.lwaftr.stream_copy').make_streaming_copy
@@ -166,25 +167,23 @@ function PodHashMap:prepare_streaming_lookup(stride)
    local gen = require('apps.lwaftr.slurp_copy').make_slurping_copy
    local slurp = gen(stride, res.entries_per_lookup, res.bytes_per_entry)
    res.stream_results = function(self)
-      slurp(self.results, self.entries, self.indices)
+      slurp(self.results, self.pointers)
    end
    return setmetatable(res, { __index = StreamingLookup })
 end
 
 function StreamingLookup:add_key(i, hash, key)
    assert(i < self.stride)
-   self.indices[i] = hash_to_index(hash, self.scale)
+   self.pointers[i] = self.entries + hash_to_index(hash, self.scale)
    self.keys[i].hash = hash
    self.keys[i].key = key
 end
 
 function StreamingLookup:stream_results()
-   local entries = self.entries
    local entries_per_lookup = self.entries_per_lookup
    local dst = self.results
-   local indices = self.indices
    for i=0,self.stride-1 do
-      self.streaming_copy(dst + i * entries_per_lookup, entries + indices[i])
+      self.streaming_copy(dst + i * entries_per_lookup, self.pointers[i])
    end
 end
 
