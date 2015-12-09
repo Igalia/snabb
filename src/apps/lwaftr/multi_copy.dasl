@@ -1,7 +1,16 @@
--- Copy routines optimized for dependency-less slurping -*- lua -*-
+-- Copy routines to stream multiple copies in parallel -*- lua -*-
 --
--- Modern Xeon chips can have up to 74 pending memory loads at once.  The
--- store buffer is smaller, http://www.realworldtech.com/haswell-cpu/5/.
+-- For big hash tables, it is expected that we will have to go all the
+-- way out to main memory every time you go to look up a value.  That's
+-- pretty expensive: around 70 nanoseconds per cache miss.  We can reduce
+-- this cost by making many fetches at once, and relying on the processor
+-- to parallelize the requests.  In this way although we can expect
+-- the latency for one lookup operation to be approximately the cost
+-- of one cache miss, if the lookup returns N values the per-lookup
+-- cost is divided by N.
+--
+-- See http://www.realworldtech.com/haswell-cpu/5/ for more on how the
+-- memory subsystem works in a modern processor.
 
 module(..., package.seeall)
 
@@ -31,16 +40,14 @@ local function assemble (name, prototype, generator)
    return ffi.cast(prototype, mcode)
 end
 
-function make_slurping_copy(stride, entry_count, entry_byte_size)
-   local bytes = entry_count * entry_byte_size
-
+function make_multi_copy(count, size)
    local function gen_multi_copy(Dst)
       -- dst in rdi
       -- src in rsi
 
       | vzeroall
 
-      local tail_size = bytes % 32
+      local tail_size = size % 32
       local tail_mask
       if tail_size ~= 0 then
          tail_mask = ffi.new("uint8_t[32]")
@@ -51,21 +58,21 @@ function make_slurping_copy(stride, entry_count, entry_byte_size)
       end
 
       -- Stream in data from up to 8 regions at once.
-      while stride > 0 do
-         local count = math.min(stride, 8)
-         local to_copy = bytes
+      while count > 0 do
+         local stride = math.min(count, 8)
+         local to_copy = size
          while to_copy >= 32 do
             -- Irritatingly there appears to be a limitation on ymm(n)
             -- and Rq(n) for n >= 8!  Get around it by limiting to
             -- ymm0-ymm7 and using memory for the indexes.
-            for i = 0, count-1 do
+            for i = 0, stride-1 do
                | mov rax, [rsi + 8*i]
                | vmovdqu ymm(i), [rax]
                | add rax, 32
                | mov [rsi + 8*i], rax
             end
-            for i = 0, count-1 do
-               | vmovdqu [rdi + i*bytes], ymm(i)
+            for i = 0, stride-1 do
+               | vmovdqu [rdi + i*size], ymm(i)
             end
             | add rdi, 32
             to_copy = to_copy - 32
@@ -74,37 +81,37 @@ function make_slurping_copy(stride, entry_count, entry_byte_size)
          if to_copy > 0 then
             assert(to_copy / 4 == math.floor(to_copy / 4),
                    '4-byte alignment required')
-            for i = 0, count-1 do
+            for i = 0, stride-1 do
                | mov rax, [rsi + 8*i]
                | vpmaskmovd ymm(i), ymm15, [rax]
                | add rax, to_copy
                | mov [rsi + 8*i], rax
             end
-            for i = 0, count-1 do
-               | vpmaskmovd [rdi + i*bytes], ymm(i), ymm15
+            for i = 0, stride-1 do
+               | vpmaskmovd [rdi + i*size], ymm15, ymm(i)
             end
             | add rdi, to_copy
             to_copy = 0
          end
 
-         -- Now the dst has been advanced by BYTES.  Increment for the
+         -- Now the dst has been advanced by SIZE.  Increment for the
          -- parallel strides.
-         | add rdi, (count-1)*bytes
+         | add rdi, (stride-1)*size
          -- Increment the src as well.
-         | add rsi, count*8
-         stride = stride - count
+         | add rsi, stride*8
+         count = count - stride
       end
       | vzeroall
       | ret
    end
 
-   return assemble("multi_copy_"..bytes,
+   return assemble("multi_copy_"..size,
                    "void(*)(void*, void*)",
                    gen_multi_copy)
 end
 
 function selftest ()
-   print("selftest: slurp_copy")
+   print("selftest: multi_copy")
    local src = ffi.new('uint8_t[78]',
                        { 1,
                          2, 2,
@@ -118,15 +125,20 @@ function selftest ()
                          10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
                          11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
                          12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12 })
-   local dst = ffi.new('uint8_t[100]')
-
-   for size=0,78 do
-      local copy = make_slurping_copy(size)
-      for offset=0,77-size do
-         ffi.C.memset(dst, 0, 100)
-         copy(dst, src + offset)
-         for i=0,size-1 do assert(dst[i] == src[offset+i]) end
-         for i=size,99 do assert(dst[i] == 0) end
+   for size=4,76,4 do
+      for count=1,10 do
+         local dst = ffi.new('uint8_t['..100*count..']')
+         local srcv = ffi.new('void*['..count..']')
+         local multi_copy = make_multi_copy(count, size)
+         for offset=0,(78 - size - count)-1 do
+            ffi.C.memset(dst, 0, 100*count)
+            for i=0,count-1 do srcv[i] = src + offset + i end
+            multi_copy(dst, srcv)
+            for i=0,count-1 do
+               for j=0,size-1 do assert(dst[i*size + j] == src[offset+i+j]) end
+            end
+            for i=count*size,100*count-1 do assert(dst[i] == 0) end
+         end
       end
    end
 

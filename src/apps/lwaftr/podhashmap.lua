@@ -164,10 +164,10 @@ function PodHashMap:prepare_streaming_lookup(stride)
    res.binary_search = gen(res.entries_per_lookup, res.bytes_per_entry)
    local gen = require('apps.lwaftr.stream_copy').make_streaming_copy
    --res.streaming_copy = gen(res.entries_per_lookup * res.bytes_per_entry)
-   local gen = require('apps.lwaftr.slurp_copy').make_slurping_copy
-   local slurp = gen(stride, res.entries_per_lookup, res.bytes_per_entry)
+   local gen = require('apps.lwaftr.multi_copy').make_multi_copy
+   local multi_copy = gen(stride, res.entries_per_lookup, res.bytes_per_entry)
    res.stream_results = function(self)
-      slurp(self.results, self.pointers)
+      multi_copy(self.results, self.pointers)
    end
    return setmetatable(res, { __index = StreamingLookup })
 end
