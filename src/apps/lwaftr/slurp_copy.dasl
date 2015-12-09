@@ -33,7 +33,88 @@ end
 
 function make_slurping_copy(stride, entry_count, entry_byte_size)
    local bytes = entry_count * entry_byte_size
-   local function gen_slurping_copy(Dst)
+
+   local function load_indices(Dst, count)
+      -- Load indices, convert to pointers.
+      for i = 0, count-1 do
+         | xor eax, eax
+         | mov eax, [rdx]
+         -- mul outputs to rdx:rax; save rdx.
+         | mov rcx, rdx
+         | mov rdx, entry_byte_size
+         | mul rdx
+         | mov rdx, rcx
+         | add rdx, 4
+         -- r8 through r11 are temporaries.
+         -- dynasm refuses to assemble Rq(n) if n is >= 8.  FML.
+         -- | lea Rq(8+i), [rsi + rax]
+         if i == 0 then
+            | lea r8, [rsi+rax]
+         elseif i == 1 then
+            | lea r9, [rsi+rax]
+         elseif i == 2 then
+            | lea r10, [rsi+rax]
+         elseif i == 3 then
+            | lea r11, [rsi+rax]
+         else error(i) end
+      end
+   end
+
+   local function gen_aligned_multi_copy(Dst)
+      -- dst in rdi
+      -- src in rsi
+      -- indices in rdx
+
+      | vzeroall
+
+      -- Fetch up to 4 keys at once; what the hell.
+      while stride > 0 do
+         local count = math.min(stride, 4)
+         load_indices(Dst, count)
+         local to_copy = bytes
+         while to_copy > 0 do
+            -- Irritatingly there appears to be a limitation on ymm(n)
+            -- for n >= 8!
+            local step = math.min(to_copy/32, 2)
+            for j = 0, step-1 do
+               for i = 0, count-1 do
+                  -- | vmovntdqa ymm(i), [Rq(8+i)]
+                  -- | add Rq(8+i), 32
+                  if i == 0 then
+                     | vmovntdqa ymm(j*count+i), [r8]
+                     | add r8,32
+                  elseif i == 1 then
+                     | vmovntdqa ymm(j*count+i), [r9]
+                     | add r9,32
+                  elseif i == 2 then
+                     | vmovntdqa ymm(j*count+i), [r10]
+                     | add r10,32
+                  elseif i == 3 then
+                     | vmovntdqa ymm(j*count+i), [r11]
+                     | add r11,32
+                  end
+               end
+            end
+            for j = 0, step-1 do
+               for i = 0, count-1 do
+                  | vmovdqu [rdi + i*bytes], ymm(j*count+i)
+               end
+               | add rdi, 32
+            end
+            to_copy = to_copy - 32*step
+         end
+
+         -- Now rdi has been advanced by BYTES.  Increment for the
+         -- parallel strides.
+         | add rdi, (count-1)*bytes
+         
+         stride = stride - count
+      end
+      | vzeroall
+      | ret
+   end
+
+   local function gen_unaligned_multi_copy(Dst)
       -- dst in rdi
       -- src in rsi
       -- indices in rdx
@@ -135,8 +216,16 @@ function make_slurping_copy(stride, entry_count, entry_byte_size)
       | vzeroall
       | ret
    end
-   return assemble("slurping_copy_"..bytes, "void(*)(void*, void*, uint32_t*)",
-                   gen_slurping_copy)
+
+   if entry_byte_size % 32 == 0 then
+      return assemble("aligned_multi_copy_"..bytes,
+                      "void(*)(void*, void*, uint32_t*)",
+                      gen_aligned_multi_copy)
+   else
+      return assemble("unaligned_multi_copy_"..bytes,
+                      "void(*)(void*, void*, uint32_t*)",
+                      gen_unaligned_multi_copy)
+   end
 end
 
 function selftest ()
