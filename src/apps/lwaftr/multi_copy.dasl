@@ -50,6 +50,7 @@ function make_multi_copy(count, size)
       local tail_size = size % 32
       local tail_mask
       if tail_size ~= 0 then
+         assert(tail_size % 4 == 0, '4-byte alignment required')
          tail_mask = ffi.new("uint8_t[32]")
          for i=0,tail_size-1 do tail_mask[i]=255 end
          table.insert(anchor, tail_mask)
@@ -79,8 +80,6 @@ function make_multi_copy(count, size)
          end
 
          if to_copy > 0 then
-            assert(to_copy / 4 == math.floor(to_copy / 4),
-                   '4-byte alignment required')
             for i = 0, stride-1 do
                | mov rax, [rsi + 8*i]
                | vpmaskmovd ymm(i), ymm15, [rax]
