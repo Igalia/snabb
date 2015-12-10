@@ -20,6 +20,7 @@ local packet = require("core.packet")
 local lib = require("core.lib")
 local bit = require("bit")
 local ffi = require("ffi")
+local filter = require("lib.pcap.filter")
 
 local band, bor, bnot, rshift, lshift = bit.band, bit.bor, bit.bnot, bit.rshift, bit.lshift
 local C = ffi.C
@@ -56,6 +57,22 @@ local function guarded_transmit(pkt, o)
    transmit(o, pkt)
 end
 
+local function transmit_o4(pkt, lwstate)
+   if lwstate.ipv4_egress_filter and
+         not lwstate.ipv4_egress_filter:match(pkt.data, pkt.length) then
+      packet.drop(pkt)
+   end
+   guarded_transmit(pkt, lwstate.o4)
+end
+
+local function transmit_o6(pkt, lwstate)
+   if lwstate.ipv6_egress_filter and
+         not lwstate.ipv6_egress_filter:match(pkt.data, pkt.length) then
+      packet.drop(pkt)
+   end
+   guarded_transmit(pkt, lwstate.o6)
+end
+
 local transmit_icmpv6_with_rate_limit
 
 local function init_transmit_icmpv6_with_rate_limit(lwstate)
@@ -77,7 +94,7 @@ local function init_transmit_icmpv6_with_rate_limit(lwstate)
       end
       -- Send packet if limit not reached.
       if counter < icmpv6_rate_limiter_n_packets then
-         guarded_transmit(pkt, o)
+         transmit_o6(pkt, o)
          counter = counter + 1
       else
          packet.free(pkt)
@@ -166,6 +183,27 @@ local function dump_binding_table(lwstate)
    print(("Binding table written to %s"):format(filename))
 end
 
+-- Compile ingress/egress filters
+local function compile_filters(lwstate)
+   local ingress_filters, egress_filters = lwstate.ingress_filters, lwstate.egress_filters
+   if ingress_filters then
+      if ingress_filters.ipv4 then
+         lwstate.ipv4_ingress_filter = filter:new(ingress_filters.ipv4)
+      end
+      if ingress_filters.ipv6 then
+         lwstate.ipv6_ingress_filter = filter:new(ingress_filters.ipv6)
+      end
+   end
+   if egress_filters then
+      if egress_filters.ipv4 then
+         lwstate.ipv4_egress_filter = filter:new(egress_filters.ipv4)
+      end
+      if egress_filters.ipv6 then
+         lwstate.ipv6_egress_filter = filter:new(egress_filters.ipv6)
+      end
+   end
+end
+
 LwAftr = {}
 
 function LwAftr:new(conf)
@@ -198,6 +236,7 @@ function LwAftr:new(conf)
       dump_binding_table(o)
    end)
    o.conf_keys = keys(conf)
+   compile_filters(o)
    if debug then lwdebug.pp(conf) end
    return setmetatable(o, {__index=LwAftr})
 end
@@ -330,7 +369,7 @@ local function icmp_after_discard(lwstate, pkt, to_ip)
    local icmp_dis = icmp.new_icmpv4_packet(lwstate.aftr_mac_inet_side, lwstate.inet_mac,
                                            lwstate.aftr_ipv4_ip, to_ip, pkt,
                                            lwstate.l2_size, icmp_config)
-   guarded_transmit(icmp_dis, lwstate.o4)
+   transmit_o4(icmp_dis, lwstate)
 end
 
 -- ICMPv6 type 1 code 5, as per RFC 7596.
@@ -343,7 +382,7 @@ local function icmp_b4_lookup_failed(lwstate, pkt, to_ip)
    local b4fail_icmp = icmp.new_icmpv6_packet(lwstate.aftr_mac_b4_side, lwstate.b4_mac,
                                               lwstate.aftr_ipv6_ip, to_ip, pkt,
                                               lwstate.l2_size, icmp_config)
-   transmit_icmpv6_with_rate_limit(b4fail_icmp, lwstate.o6)
+   transmit_icmpv6_with_rate_limit(b4fail_icmp, lwstate)
 end
 
 -- Given a packet containing IPv4 and Ethernet, encapsulate the IPv4 portion.
@@ -372,7 +411,7 @@ local function ipv6_encapsulate(lwstate, pkt, next_hdr_type, ipv6_src, ipv6_dst,
          print("encapsulated packet:")
          lwdebug.print_pkt(pkt)
       end
-      guarded_transmit(pkt, lwstate.o6)
+      transmit_o6(pkt, lwstate)
       return
    end
 
@@ -397,7 +436,7 @@ local function ipv6_encapsulate(lwstate, pkt, next_hdr_type, ipv6_src, ipv6_dst,
                                               lwstate.aftr_ipv4_ip, dst_ip, pkt,
                                               lwstate.l2_size, icmp_config)
       packet.free(pkt)
-      guarded_transmit(icmp_pkt, lwstate.o4)
+      transmit_o4(icmp_pkt, lwstate)
       return
    end
 
@@ -411,7 +450,7 @@ local function ipv6_encapsulate(lwstate, pkt, next_hdr_type, ipv6_src, ipv6_dst,
       end
    end
    for i=1,#pkts do
-      guarded_transmit(pkts[i], lwstate.o6)
+      transmit_o6(pkts[i], lwstate)
    end
 end
 
@@ -503,7 +542,7 @@ local function from_inet(lwstate, pkt)
             if lwstate.policy_icmpv4_outgoing == lwconf.policies["DROP"] then
                packet.free(maybe_pkt)
             else
-               guarded_transmit(maybe_pkt, lwstate.o4)
+               transmit_o4(maybe_pkt, lwstate)
             end
          end
          return
@@ -559,7 +598,7 @@ local function from_inet(lwstate, pkt)
       local ttl0_icmp =  icmp.new_icmpv4_packet(lwstate.aftr_mac_inet_side, lwstate.inet_mac,
                                                 lwstate.aftr_ipv4_ip, dst_ip, pkt,
                                                 lwstate.l2_size, icmp_config)
-      guarded_transmit(ttl0_icmp, lwstate.o4)
+      transmit_o4(ttl0_icmp, lwstate)
       return
    end
 
@@ -652,7 +691,7 @@ local function icmpv6_incoming(lwstate, pkt)
       -- like notifications to any non-bound host.
       return icmpv4_incoming(lwstate, icmpv4_reply) -- to B4
    else
-      guarded_transmit(icmpv4_reply, lwstate.o4)
+      transmit_o4(icmpv4_reply, lwstate)
    end
 end
 
@@ -703,7 +742,7 @@ local function from_b4(lwstate, pkt)
             if lwstate.policy_icmpv6_outgoing == lwconf.policies['DROP'] then
                packet.free(maybe_pkt)
             else
-               guarded_transmit(maybe_pkt, lwstate.o6)
+               transmit_o6(maybe_pkt, lwstate)
             end
             return
          end
@@ -764,7 +803,7 @@ local function from_b4(lwstate, pkt)
             local fragstatus, frags = fragmentv4.fragment_ipv4(pkt, lwstate.l2_size, lwstate.ipv4_mtu)
             if fragstatus == fragmentv4.FRAGMENT_OK then
                for i=1,#frags do
-                  guarded_transmit(frags[i], lwstate.o4)
+                  transmit_o4(frags[i], lwstate)
                end
                return
             else
@@ -773,7 +812,7 @@ local function from_b4(lwstate, pkt)
                return
             end
          else -- No fragmentation needed
-            guarded_transmit(pkt, lwstate.o4)
+            transmit_o4(pkt, lwstate)
             return
          end
       end
@@ -810,26 +849,36 @@ function LwAftr:push ()
 
    for _=1,math.min(link.nreadable(i4), link.nwritable(o6)) do
       local pkt = receive(i4)
-      if debug then print("got a pkt") end
-      -- Keep the ethertype in network byte order
-      local ethertype = rd16(pkt.data + self.o_ethernet_ethertype)
-
-      if ethertype == constants.n_ethertype_ipv4 then -- Incoming packet from the internet
-         from_inet(self, pkt)
-      else
+      if self.ipv4_ingress_filter and
+            not self.ipv4_ingress_filter:match(pkt.data, pkt.length) then
          packet.free(pkt)
-      end -- Silently drop all other types coming from the internet interface
+      else
+         if debug then print("got a pkt") end
+         -- Keep the ethertype in network byte order
+         local ethertype = rd16(pkt.data + self.o_ethernet_ethertype)
+
+         if ethertype == constants.n_ethertype_ipv4 then -- Incoming packet from the internet
+            from_inet(self, pkt)
+         else
+            packet.free(pkt)
+         end -- Silently drop all other types coming from the internet interface
+      end
    end
 
    for _=1,math.min(link.nreadable(i6), link.nwritable(o4)) do
       local pkt = receive(i6)
-      if debug then print("got a pkt") end
-      local ethertype = rd16(pkt.data + self.o_ethernet_ethertype)
-      if ethertype == constants.n_ethertype_ipv6 then
-         -- decapsulate iff the source was a b4, and forward/hairpin/ICMPv6 as needed
-         from_b4(self, pkt)
-      else
+      if self.ipv6_ingress_filter and
+            not self.ipv6_ingress_filter:match(pkt.data, pkt.length) then
          packet.free(pkt)
-      end -- FIXME: silently drop other types; is this the right thing to do?
+      else
+         if debug then print("got a pkt") end
+         local ethertype = rd16(pkt.data + self.o_ethernet_ethertype)
+         if ethertype == constants.n_ethertype_ipv6 then
+            -- decapsulate iff the source was a b4, and forward/hairpin/ICMPv6 as needed
+            from_b4(self, pkt)
+         else
+            packet.free(pkt)
+         end -- FIXME: silently drop other types; is this the right thing to do?
+      end
    end
 end
