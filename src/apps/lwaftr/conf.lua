@@ -4,6 +4,7 @@ local ethernet = require("lib.protocol.ethernet")
 local ffi = require("ffi")
 local ipv4 = require("lib.protocol.ipv4")
 local ipv6 = require("lib.protocol.ipv6")
+local acl = require("apps.lwaftr.acl")
 
 local bt = require("apps.lwaftr.binding_table")
 
@@ -13,6 +14,20 @@ policies = {
 }
 
 local aftrconf
+
+local function dirname(filename)
+   return filename:match("(.*)%/.*$")
+end
+
+-- Compiles ACL file and adds filters to conf file.
+local function compile_acl_file(conf, filename)
+   local filters = acl.compile(filename, {skip_header = true})
+   conf.ipv4_egress_filter  = filters.egress_filter.ipv4
+   conf.ipv6_egress_filter  = filters.egress_filter.ipv6
+   conf.ipv4_ingress_filter  = filters.ingress_filter.ipv4
+   conf.ipv6_ingress_filter  = filters.ingress_filter.ipv6
+   conf.acl = nil
+end
 
 -- TODO: rewrite this after netconf integration
 local function read_conf(conf_file)
@@ -24,8 +39,13 @@ local function read_conf(conf_file)
       end
       return _conff
    ]]):format(conf_vars)
-   local conf = assert(loadstring(full_config))()
-   return conf(policies, ipv4, ipv6, ethernet, bt)
+   local f = assert(loadstring(full_config))()
+   local conf = f(policies, ipv4, ipv6, ethernet, bt)
+   if conf.acl then
+      local acl_file = ("%s/%s"):format(dirname(conf_file), conf.acl)
+      compile_acl_file(conf, acl_file)
+   end
+   return conf
 end
 
 function get_aftrconf(conf_file)

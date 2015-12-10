@@ -20,7 +20,6 @@ local packet = require("core.packet")
 local lib = require("core.lib")
 local bit = require("bit")
 local ffi = require("ffi")
-local filter = require("lib.pcap.filter")
 
 local band, bor, bnot, rshift, lshift = bit.band, bit.bor, bit.bnot, bit.rshift, bit.lshift
 local C = ffi.C
@@ -183,27 +182,6 @@ local function dump_binding_table(lwstate)
    print(("Binding table written to %s"):format(filename))
 end
 
--- Compile ingress/egress filters
-local function compile_filters(lwstate)
-   local ingress_filters, egress_filters = lwstate.ingress_filters, lwstate.egress_filters
-   if ingress_filters then
-      if ingress_filters.ipv4 then
-         lwstate.ipv4_ingress_filter = filter:new(ingress_filters.ipv4)
-      end
-      if ingress_filters.ipv6 then
-         lwstate.ipv6_ingress_filter = filter:new(ingress_filters.ipv6)
-      end
-   end
-   if egress_filters then
-      if egress_filters.ipv4 then
-         lwstate.ipv4_egress_filter = filter:new(egress_filters.ipv4)
-      end
-      if egress_filters.ipv6 then
-         lwstate.ipv6_egress_filter = filter:new(egress_filters.ipv6)
-      end
-   end
-end
-
 LwAftr = {}
 
 function LwAftr:new(conf)
@@ -236,7 +214,6 @@ function LwAftr:new(conf)
       dump_binding_table(o)
    end)
    o.conf_keys = keys(conf)
-   compile_filters(o)
    if debug then lwdebug.pp(conf) end
    return setmetatable(o, {__index=LwAftr})
 end
