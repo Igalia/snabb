@@ -9,6 +9,7 @@ local lwconf = require("apps.lwaftr.conf")
 local lwdebug = require("apps.lwaftr.lwdebug")
 local lwheader = require("apps.lwaftr.lwheader")
 local lwutil = require("apps.lwaftr.lwutil")
+local rangemap = require('apps.lwaftr.rangemap')
 
 local S = require("syscall")
 local timer = require("core.timer")
@@ -41,6 +42,28 @@ local function compute_binding_table_by_ipv4(binding_table)
       ret[bind[2]] = bind
    end
    return ret
+end
+
+local function compute_ak_map(binding_table)
+   local function extract_value(entry)
+      local psid_info = entry[3]
+      local value = ffi.new("struct ak_t")
+      value.a, value.k = psid_info[2], psid_info[3]
+      return value
+   end
+   local function extract_key_and_value(entry)
+      local ipv4 = entry[2]
+      return ipv4, extract_value(entry)
+   end
+   ffi.cdef([[
+      struct ak_t { uint8_t a; uint8_t k; }
+   ]])
+   local builder = rangemap.RangeMapBuilder.new(ffi.typeof("struct ak_t"))
+   for _, entry in ipairs(binding_table) do
+      local key, value = extract_key_and_value(entry)
+      builder:add(key, value)
+   end
+   return builder:build()
 end
 
 local function guarded_transmit(pkt, o)
@@ -189,6 +212,7 @@ function LwAftr:new(conf)
       o.o_ethernet_ethertype = constants.o_ethernet_ethertype
    end
    o.binding_table_by_ipv4 = compute_binding_table_by_ipv4(o.binding_table)
+   o.ak_map = compute_ak_map(o.binding_table)
    o.fragment6_cache = {}
    o.fragment4_cache = {}
    transmit_icmpv6_with_rate_limit = init_transmit_icmpv6_with_rate_limit(o)
@@ -237,14 +261,10 @@ local function get_lwAFTR_ipv6(lwstate, binding_entry)
    return lwaftr_ipv6
 end
 
-local function port_to_psid(port, M, R)
+local function port_to_psid(port, a, k)
+   local m = 16 - (a + k)
+   local M, R = 2^m, 2^k
    return math.floor(port/M) % R
-end
-
-local function in_range(port, psid_params)
-   local psid, offset, length = psid_params[1], psid_params[2], psid_params[3]
-   local m = 16 - (offset + length)
-   return port_to_psid(port, 2^m, 2^length) == psid
 end
 
 -- TODO: make this O(1), and seriously optimize it for cache lines
@@ -253,19 +273,27 @@ local function binding_lookup_ipv4(lwstate, ipv4_ip, port)
       print(lwdebug.format_ipv4(ipv4_ip), 'port: ', port, string.format("%x", port))
       lwdebug.pp(lwstate.binding_table)
    end
+   local ak_map = lwstate.ak_map
+   local offset = ak_map:lookup(ipv4_ip)
+   if not offset then 
+      if debug then
+         print("Nothing found for ipv4:port", lwdebug.format_ipv4(ipv4_ip),
+         string.format("%i (0x%x)", port, port))
+      end
+      return
+   end
+   local a, k = ak_map:val_at(offset).a, ak_map:val_at(offset).k
+   local psid = port_to_psid(port, a, k)
    for i=1,#lwstate.binding_table do
       local bind = lwstate.binding_table[i]
       if debug then print("CHECK", string.format("%x, %x", bind[2], ipv4_ip)) end
       if bind[2] == ipv4_ip then
-         if in_range(port, bind[3]) then
+         local psid_info = bind[3]
+         if psid_info[1] == psid then
             local lwaftr_ipv6 = get_lwAFTR_ipv6(lwstate, bind)
             return bind[1], lwaftr_ipv6
          end
       end
-   end
-   if debug then
-      print("Nothing found for ipv4:port", lwdebug.format_ipv4(ipv4_ip),
-      string.format("%i (0x%x)", port, port))
    end
 end
 
@@ -301,13 +329,19 @@ end
 -- Todo: make this O(1)
 local function in_binding_table(lwstate, ipv6_src_ip, ipv6_dst_ip, ipv4_src_ip, ipv4_src_port)
    local binding_table = lwstate.binding_table
+   local ak_map = lwstate.ak_map
+   local offset = ak_map:lookup(ipv4_src_ip)
+   if not offset then return false end
+   local a, k = ak_map:val_at(offset).a, ak_map:val_at(offset).k
+   local psid = port_to_psid(ipv4_src_port, a, k)
    for i=1,#binding_table do
       local bind = binding_table[i]
       if debug then
          print("CHECKB4", string.format("%x, %x", bind[2], ipv4_src_ip), ipv4_src_port)
       end
       if bind[2] == ipv4_src_ip then
-         if in_range(ipv4_src_port, bind[3]) then
+         local psid_info = bind[3]
+         if psid_info[1] == psid then
             if debug then
                print("ipv6bind")
                lwdebug.print_ipv6(bind[1])
