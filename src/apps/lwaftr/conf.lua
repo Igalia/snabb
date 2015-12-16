@@ -22,11 +22,10 @@ end
 -- Compiles ACL file and adds filters to conf file.
 local function compile_acl_file(conf, filename)
    local filters = acl.compile(filename, {skip_header = true})
-   conf.ipv4_egress_filter  = filters.egress_filter.ipv4
-   conf.ipv6_egress_filter  = filters.egress_filter.ipv6
-   conf.ipv4_ingress_filter  = filters.ingress_filter.ipv4
-   conf.ipv6_ingress_filter  = filters.ingress_filter.ipv6
-   conf.acl = nil
+   conf.ipv4_ingress_filter = filters.ipv4_ingress_filter
+   conf.ipv6_ingress_filter = filters.ipv6_ingress_filter
+   conf.ipv4_egress_filter = filters.ipv4_egress_filter
+   conf.ipv6_egress_filter = filters.ipv6_egress_filter
 end
 
 -- TODO: rewrite this after netconf integration
