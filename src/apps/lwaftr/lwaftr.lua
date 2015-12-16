@@ -45,9 +45,12 @@ local function compute_binding_table_by_ipv4(binding_table)
 end
 
 local function compute_ak_map(binding_table)
+   local value_type = ffi.typeof([[
+      struct { uint16_t a; uint16_t k; }
+   ]])
    local function extract_value(entry)
       local psid_info = entry[3]
-      local value = ffi.new("struct ak_t")
+      local value = ffi.new(value_type)
       value.a, value.k = psid_info[2], psid_info[3]
       return value
    end
@@ -55,10 +58,7 @@ local function compute_ak_map(binding_table)
       local ipv4 = entry[2]
       return ipv4, extract_value(entry)
    end
-   ffi.cdef([[
-      struct ak_t { uint8_t a; uint8_t k; }
-   ]])
-   local builder = rangemap.RangeMapBuilder.new(ffi.typeof("struct ak_t"))
+   local builder = rangemap.RangeMapBuilder.new(value_type)
    for _, entry in ipairs(binding_table) do
       local key, value = extract_key_and_value(entry)
       builder:add(key, value)
@@ -263,8 +263,8 @@ end
 
 local function port_to_psid(port, a, k)
    local m = 16 - (a + k)
-   local M, R = 2^m, 2^k
-   return math.floor(port/M) % R
+   local R = 2^k
+   return band(rshift(port, m), R-1)
 end
 
 -- TODO: make this O(1), and seriously optimize it for cache lines
@@ -275,15 +275,8 @@ local function binding_lookup_ipv4(lwstate, ipv4_ip, port)
    end
    local ak_map = lwstate.ak_map
    local offset = ak_map:lookup(ipv4_ip)
-   if not offset then 
-      if debug then
-         print("Nothing found for ipv4:port", lwdebug.format_ipv4(ipv4_ip),
-         string.format("%i (0x%x)", port, port))
-      end
-      return
-   end
-   local a, k = ak_map:val_at(offset).a, ak_map:val_at(offset).k
-   local psid = port_to_psid(port, a, k)
+   local val = ak_map:val_at(offset)
+   local psid = port_to_psid(port, val.a, val.k)
    for i=1,#lwstate.binding_table do
       local bind = lwstate.binding_table[i]
       if debug then print("CHECK", string.format("%x, %x", bind[2], ipv4_ip)) end
@@ -294,6 +287,10 @@ local function binding_lookup_ipv4(lwstate, ipv4_ip, port)
             return bind[1], lwaftr_ipv6
          end
       end
+   end
+   if debug then
+      print("Nothing found for ipv4:port", lwdebug.format_ipv4(ipv4_ip),
+      string.format("%i (0x%x)", port, port))
    end
 end
 
@@ -331,9 +328,8 @@ local function in_binding_table(lwstate, ipv6_src_ip, ipv6_dst_ip, ipv4_src_ip, 
    local binding_table = lwstate.binding_table
    local ak_map = lwstate.ak_map
    local offset = ak_map:lookup(ipv4_src_ip)
-   if not offset then return false end
-   local a, k = ak_map:val_at(offset).a, ak_map:val_at(offset).k
-   local psid = port_to_psid(ipv4_src_port, a, k)
+   local val = ak_map:val_at(offset)
+   local psid = port_to_psid(ipv4_src_port, val.a, val.k)
    for i=1,#binding_table do
       local bind = binding_table[i]
       if debug then
