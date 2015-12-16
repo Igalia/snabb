@@ -36,6 +36,7 @@ function dump_configuration(lwstate)
    local etharr = set('aftr_mac_b4_side',  'aftr_mac_inet_side', 'b4_mac',  'inet_mac')
    local ipv4arr = set('aftr_ipv4_ip')
    local ipv6arr = set('aftr_ipv6_ip')
+   -- TODO: Skip compiled filters
    local val
    for _, k in ipairs(lwstate.conf_keys) do
       local v = lwstate[k]
@@ -69,13 +70,15 @@ function dump_binding_table(lwstate)
    local function dump()
       return table.concat(content, "\n")
    end
+   local function format_psid_info(psid_info)
+      return ("{%d, %d, %d}"):format(psid_info[1], psid_info[2], psid_info[3])
+   end
    local function format_entry(entry)
-      local v6, v4, port_start, port_end, br_v6 = entry[1], entry[2], entry[3], entry[4], entry[5]
+      local v6, v4, psid_info, br_v6 = entry[1], entry[2], entry[3], entry[4]
       local result = {}
       table.insert(result, ("'%s'"):format(ipv6:ntop(v6)))
       table.insert(result, ("'%s'"):format(ipv4number_to_str(v4)))
-      table.insert(result, port_start)
-      table.insert(result, port_end)
+      table.insert(result, format_psid_info(psid_info))
       if br_v6 then
          table.insert(result, ("'%s'"):format(ipv6:ntop(br_v6)))
       end
