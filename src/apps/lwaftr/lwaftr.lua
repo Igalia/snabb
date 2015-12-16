@@ -111,7 +111,7 @@ end
 local function on_signal(sig, f)
    local fd = S.signalfd(sig, "nonblock") -- handle signal via fd
    S.sigprocmask("block", sig)            -- block traditional handler
-   timer.activate(timer.new("sighup-reload-binding-table", function ()
+   timer.activate(timer.new(sig, function ()
       if (#S.util.signalfd_read(fd) > 0) then
          print(("[snabb-lwaftr: %s caught]"):format(sig:upper()))
          f()
