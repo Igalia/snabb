@@ -270,4 +270,48 @@ snabb_run_and_cmp ${TEST_BASE}/tunnel_icmp.conf \
    ${EMPTY} ${TEST_BASE}/incoming-icmpv6-30hoplevelexceeded-hairpinned-OPE.pcap \
    ${EMPTY} ${TEST_BASE}/response-ipv6-tunneled-icmpv4_31-tob4.pcap
 
+# Ingress filters
+
+echo "Testing: ingress-filter: from-internet (IPv4) packet found in binding table (ACCEPT)"
+snabb_run_and_cmp ${TEST_BASE}/no_icmp_with_filters_accept.conf \
+   ${TEST_BASE}/tcp-frominet-trafficclass.pcap ${EMPTY} \
+   ${EMPTY} ${TEST_BASE}/tcp-afteraftr-ipv6-trafficclass.pcap
+
+echo "Testing: ingress-filter: from-internet (IPv4) packet found in binding table (DROP)"
+snabb_run_and_cmp ${TEST_BASE}/no_icmp_with_filters_drop.conf \
+   ${TEST_BASE}/tcp-frominet-trafficclass.pcap ${EMPTY} \
+   ${EMPTY} ${EMPTY}
+
+echo "Testing: ingress-filter: from-b4 (IPv6) packet found in binding table (ACCEPT)"
+snabb_run_and_cmp ${TEST_BASE}/no_icmp_with_filters_accept.conf \
+   ${EMPTY} ${TEST_BASE}/tcp-fromb4-ipv6.pcap \
+   ${TEST_BASE}/decap-ipv4.pcap ${EMPTY}
+
+echo "Testing: ingress-filter: from-b4 (IPv6) packet found in binding table (DROP)"
+snabb_run_and_cmp ${TEST_BASE}/no_icmp_with_filters_drop.conf \
+   ${EMPTY} ${TEST_BASE}/tcp-fromb4-ipv6.pcap \
+   ${EMPTY} ${EMPTY}
+
+# Egress filters
+
+echo "Testing: egress-filter: to-internet (IPv4) (ACCEPT)"
+snabb_run_and_cmp ${TEST_BASE}/no_icmp_with_filters_accept.conf \
+   ${EMPTY} ${TEST_BASE}/tcp-fromb4-ipv6.pcap \
+   ${TEST_BASE}/decap-ipv4.pcap ${EMPTY}
+
+echo "Testing: egress-filter: to-internet (IPv4) (DROP)"
+snabb_run_and_cmp ${TEST_BASE}/no_icmp_with_filters_drop.conf \
+   ${EMPTY} ${TEST_BASE}/tcp-fromb4-ipv6.pcap \
+   ${EMPTY} ${EMPTY}
+
+echo "Testing: egress-filter: to-b4 (IPv4) (ACCEPT)"
+snabb_run_and_cmp ${TEST_BASE}/no_icmp_with_filters_accept.conf \
+   ${TEST_BASE}/tcp-frominet-trafficclass.pcap ${EMPTY} \
+   ${EMPTY} ${TEST_BASE}/tcp-afteraftr-ipv6-trafficclass.pcap
+
+echo "Testing: egress-filter: to-b4 (IPv4) (DROP)"
+snabb_run_and_cmp ${TEST_BASE}/no_icmp_with_filters_drop.conf \
+   ${TEST_BASE}/tcp-frominet-trafficclass.pcap ${EMPTY} \
+   ${EMPTY} ${EMPTY}
+
 echo "All end-to-end lwAFTR tests passed."
