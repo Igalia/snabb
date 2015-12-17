@@ -44,14 +44,20 @@ local function compute_binding_table_by_ipv4(binding_table)
    return ret
 end
 
-local function compute_ak_map(binding_table)
+local function port_to_psid(port, reserved_ports_bit_count, psid_len)
+   local shift = 16 - (reserved_ports_bit_count + psid_len)
+   return band(rshift(port, shift), (2^psid_len)-1)
+end
+
+local function compute_psid_info_map(binding_table)
    local value_type = ffi.typeof([[
-      struct { uint16_t a; uint16_t k; }
+      struct { uint16_t reserved_ports_bit_count; uint16_t psid_len; }
    ]])
    local function extract_value(entry)
       local psid_info = entry[3]
       local value = ffi.new(value_type)
-      value.a, value.k = psid_info[2], psid_info[3]
+      value.reserved_ports_bit_count = psid_info.reserved_ports_bit_count or 0
+      value.psid_len = psid_info.psid_len or 0
       return value
    end
    local function extract_key_and_value(entry)
@@ -63,7 +69,16 @@ local function compute_ak_map(binding_table)
       local key, value = extract_key_and_value(entry)
       builder:add(key, value)
    end
-   return builder:build()
+   local map = builder:build()
+   function map:lookup_value(ipv4)
+      local offset = self:lookup(ipv4)
+      return self:val_at(offset)
+   end
+   function map:lookup_psid(ipv4, port)
+      local value = self:lookup_value(ipv4)
+      return port_to_psid(port, value.reserved_ports_bit_count, value.psid_len)
+   end
+   return map
 end
 
 local function guarded_transmit(pkt, o)
@@ -212,7 +227,7 @@ function LwAftr:new(conf)
       o.o_ethernet_ethertype = constants.o_ethernet_ethertype
    end
    o.binding_table_by_ipv4 = compute_binding_table_by_ipv4(o.binding_table)
-   o.ak_map = compute_ak_map(o.binding_table)
+   o.psid_info_map = compute_psid_info_map(o.binding_table)
    o.fragment6_cache = {}
    o.fragment4_cache = {}
    transmit_icmpv6_with_rate_limit = init_transmit_icmpv6_with_rate_limit(o)
@@ -261,28 +276,19 @@ local function get_lwAFTR_ipv6(lwstate, binding_entry)
    return lwaftr_ipv6
 end
 
-local function port_to_psid(port, a, k)
-   local m = 16 - (a + k)
-   local R = 2^k
-   return band(rshift(port, m), R-1)
-end
-
 -- TODO: make this O(1), and seriously optimize it for cache lines
 local function binding_lookup_ipv4(lwstate, ipv4_ip, port)
    if debug then
       print(lwdebug.format_ipv4(ipv4_ip), 'port: ', port, string.format("%x", port))
       lwdebug.pp(lwstate.binding_table)
    end
-   local ak_map = lwstate.ak_map
-   local offset = ak_map:lookup(ipv4_ip)
-   local val = ak_map:val_at(offset)
-   local psid = port_to_psid(port, val.a, val.k)
+   local psid = lwstate.psid_info_map:lookup_psid(ipv4_ip, port)
    for i=1,#lwstate.binding_table do
       local bind = lwstate.binding_table[i]
       if debug then print("CHECK", string.format("%x, %x", bind[2], ipv4_ip)) end
       if bind[2] == ipv4_ip then
          local psid_info = bind[3]
-         if psid_info[1] == psid then
+         if psid_info.psid == psid then
             local lwaftr_ipv6 = get_lwAFTR_ipv6(lwstate, bind)
             return bind[1], lwaftr_ipv6
          end
@@ -326,10 +332,7 @@ end
 -- Todo: make this O(1)
 local function in_binding_table(lwstate, ipv6_src_ip, ipv6_dst_ip, ipv4_src_ip, ipv4_src_port)
    local binding_table = lwstate.binding_table
-   local ak_map = lwstate.ak_map
-   local offset = ak_map:lookup(ipv4_src_ip)
-   local val = ak_map:val_at(offset)
-   local psid = port_to_psid(ipv4_src_port, val.a, val.k)
+   local psid = lwstate.psid_info_map:lookup_psid(ipv4_src_ip, ipv4_src_port)
    for i=1,#binding_table do
       local bind = binding_table[i]
       if debug then
@@ -337,7 +340,7 @@ local function in_binding_table(lwstate, ipv6_src_ip, ipv6_dst_ip, ipv4_src_ip, 
       end
       if bind[2] == ipv4_src_ip then
          local psid_info = bind[3]
-         if psid_info[1] == psid then
+         if psid_info.psid == psid then
             if debug then
                print("ipv6bind")
                lwdebug.print_ipv6(bind[1])

@@ -32,30 +32,55 @@ end
 
 local machine_friendly_binding_table
 
--- b4_v6 is for the B4, br_v6 is for the border router (lwAFTR)
--- Entry format: {b4_v6, v4, { psid }, br_v6}
+--[[
+b4_v6 is for the B4, br_v6 is for the border router (lwAFTR)
+
+Binding table format:
+   - Entry: {b4_v6, v4, { psid_info }, br_v6}
+   - PSID Info: {reserved_ports_bit_count=bits, psid_len=bits, shift=bits}
+
+Where:
+
+   - reserved_ports_bit_count = a bits.
+   - psid_len = k bits.
+   - shift = m bits.
+
+                     0                   1
+                     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+                    +-----------+-----------+-------+
+      Ports in      |     A     |    PSID   |   j   |
+   the CE port set  |    > 0    |           |       |
+                    +-----------+-----------+-------+
+                    |  a bits   |  k bits   |m bits |
+
+            Figure 2: Structure of a Port-Restricted Port Field
+
+Source: http://tools.ietf.org/html/rfc7597#section-5.1 
+--]]
+
 local function pton_binding_table(bt)
    local pbt = {}
    local inserted = {}
    for _, v in ipairs(bt) do
-      local b4_v6, pv4, psid, br_v6 = unpack(v)
-      local offset, length = psid[2], psid[3]
+      local b4_v6, pv4, psid_info, br_v6 = unpack(v)
+      local reserved_ports_bit_count = psid_info.reserved_ports_bit_count or 0
+      local psid_len = psid_info.psid_len or 0
       pv4 = lwutil.rd32(ipv4:pton(pv4))
       if inserted[pv4] then
          local entry = inserted[pv4]
-         assert(offset == entry.offset and length == entry.length, 
+         assert(reserved_ports_bit_count == entry.reserved_ports_bit_count and psid_len == entry.psid_len, 
             "There are at least two entries with the same IPv4 address but "..
-            "with different PSID offset and PSID length")
+            "with different psid_info reserved_ports_bit_count and psid_info psid_len")
       end
       if not inserted[pv4] then
-         inserted[pv4] = {offset = offset, length = length}
+         inserted[pv4] = {reserved_ports_bit_count = reserved_ports_bit_count, psid_len = psid_len}
       end
       b4_v6 = ipv6:pton(b4_v6)
       local pentry
       if br_v6 then
-         pentry = {b4_v6, pv4, psid, ipv6:pton(br_v6)}
+         pentry = {b4_v6, pv4, psid_info, ipv6:pton(br_v6)}
       else
-         pentry = {b4_v6, pv4, psid}
+         pentry = {b4_v6, pv4, psid_info}
       end
       table.insert(pbt, pentry)
    end
