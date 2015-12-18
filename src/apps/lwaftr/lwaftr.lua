@@ -44,20 +44,29 @@ local function compute_binding_table_by_ipv4(binding_table)
    return ret
 end
 
-local function port_to_psid(port, reserved_ports_bit_count, psid_len)
-   local shift = 16 - (reserved_ports_bit_count + psid_len)
-   return band(rshift(port, shift), (2^psid_len)-1)
+local function port_to_psid(port, psid_len, shift)
+   local psid_mask = lshift(1, psid_len)-1
+   local psid = band(rshift(port, shift), psid_mask)
+   -- There are restricted ports.
+   if psid_len + shift < 16 then
+      local reserved_ports_bit_count = 16 - psid_len - shift
+      local first_allocated_port = lshift(1, reserved_ports_bit_count)
+      -- Port is within the range of restricted ports, assign bogus PSID so lookup
+      -- will fail.
+      if port < first_allocated_port then psid = psid_mask + 1 end
+   end
+   return psid
 end
 
 local function compute_psid_info_map(binding_table)
    local value_type = ffi.typeof([[
-      struct { uint16_t reserved_ports_bit_count; uint16_t psid_len; }
+      struct { uint16_t psid_len; uint16_t shift; }
    ]])
    local function extract_value(entry)
       local psid_info = entry[3]
       local value = ffi.new(value_type)
-      value.reserved_ports_bit_count = psid_info.reserved_ports_bit_count or 0
-      value.psid_len = psid_info.psid_len or 0
+      value.psid_len = psid_info.psid_len
+      value.shift = psid_info.shift
       return value
    end
    local function extract_key_and_value(entry)
@@ -72,11 +81,11 @@ local function compute_psid_info_map(binding_table)
    local map = builder:build()
    function map:lookup_value(ipv4)
       local offset = self:lookup(ipv4)
-      return self:val_at(offset)
+      return self:val_at(offset).psid_len, self:val_at(offset).shift
    end
    function map:lookup_psid(ipv4, port)
-      local value = self:lookup_value(ipv4)
-      return port_to_psid(port, value.reserved_ports_bit_count, value.psid_len)
+      local psid_len, shift = self:lookup_value(ipv4)
+      return port_to_psid(port, psid_len, shift)
    end
    return map
 end

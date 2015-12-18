@@ -37,13 +37,9 @@ b4_v6 is for the B4, br_v6 is for the border router (lwAFTR)
 
 Binding table format:
    - Entry: {b4_v6, v4, { psid_info }, br_v6}
-   - PSID Info: {reserved_ports_bit_count=bits, psid_len=bits, shift=bits}
+   - PSID Info: {psid_len=bits, shift=bits}
 
 Where:
-
-   - reserved_ports_bit_count = a bits.
-   - psid_len = k bits.
-   - shift = m bits.
 
                      0                   1
                      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
@@ -55,6 +51,10 @@ Where:
 
             Figure 2: Structure of a Port-Restricted Port Field
 
+- a bits = reserved_ports_bit_count.
+- k bits = psid_len.
+- m bits = shift.
+
 Source: http://tools.ietf.org/html/rfc7597#section-5.1 
 --]]
 
@@ -63,17 +63,17 @@ local function pton_binding_table(bt)
    local inserted = {}
    for _, v in ipairs(bt) do
       local b4_v6, pv4, psid_info, br_v6 = unpack(v)
-      local reserved_ports_bit_count = psid_info.reserved_ports_bit_count or 0
-      local psid_len = psid_info.psid_len or 0
+      local psid_len = assert(psid_info.psid_len)
+      psid_info.shift = psid_info.shift or (16 - psid_len)
       pv4 = lwutil.rd32(ipv4:pton(pv4))
       if inserted[pv4] then
          local entry = inserted[pv4]
-         assert(reserved_ports_bit_count == entry.reserved_ports_bit_count and psid_len == entry.psid_len, 
-            "There are at least two entries with the same IPv4 address but "..
-            "with different psid_info reserved_ports_bit_count and psid_info psid_len")
+         assert(psid_len == entry.psid_len,
+            "To guarantee non-overlapping port sets, the PSID length MUST be "..
+            "the same for every MAP CE sharing the same address")
       end
       if not inserted[pv4] then
-         inserted[pv4] = {reserved_ports_bit_count = reserved_ports_bit_count, psid_len = psid_len}
+         inserted[pv4] = {psid_len = psid_len}
       end
       b4_v6 = ipv6:pton(b4_v6)
       local pentry
