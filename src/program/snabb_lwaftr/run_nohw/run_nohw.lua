@@ -2,6 +2,7 @@ module(..., package.seeall)
 
 local CSVStatsTimer = require("lib.csv_stats").CSVStatsTimer
 local ethernet = require("lib.protocol.ethernet")
+local Tap = require("program.snabb_lwaftr.run_nohw.tap").Tap
 local RawSocket = require("apps.socket.raw").RawSocket
 local LwAftr = require("apps.lwaftr.lwaftr").LwAftr
 local conf = require("apps.lwaftr.conf")
@@ -22,8 +23,12 @@ local function file_exists(path)
 end
 
 local function parse_args(args)
+   local device_kind_map = {
+      tap = { app = Tap, tx = "output", rx = "input" };
+      raw = { app = RawSocket, tx = "tx", rx = "rx" };
+   }
    local verbosity = 0
-   local bt_file, conf_file, b4_if, inet_if
+   local bt_file, conf_file, b4_if, b4_if_kind, inet_if, inet_if_kind
    local handlers = {
       v = function ()
          verbosity = verbosity + 1
@@ -40,11 +45,21 @@ local function parse_args(args)
       end;
       B = function (arg)
          check(arg, "argument to '--b4-if' not specified")
-         b4_if = arg
+         b4_if_kind, b4_if = arg:match("^([a-z]+):([^%s]+)$")
+         check(b4_if,
+               "invalid/missing device name in '%s'", arg)
+         check(b4_if_kind and device_kind_map[b4_if_kind],
+               "invalid/missing device kind in '%s'", arg)
+         b4_if_kind = device_kind_map[b4_if_kind]
       end;
       I = function (arg)
          check(arg, "argument to '--inet-if' not specified")
-         inet_if = arg
+         inet_if_kind, inet_if = arg:match("^([a-z]+):([^%s]+)$")
+         check(inet_if,
+               "invalid/missing device name in '%s'", arg)
+         check(inet_if_kind and device_kind_map[inet_if_kind],
+               "invalid/missing device kind in '%s'", arg)
+         inet_if_kind = device_kind_map[inet_if_kind]
       end;
       h = function (arg)
 		print(require("program.snabb_lwaftr.run_nohw.README_inc"))
@@ -59,12 +74,12 @@ local function parse_args(args)
    check(conf_file, "no configuration specified (--conf/-c)")
    check(b4_if, "no B4-side interface specified (--b4-if/-B)")
    check(inet_if, "no Internet-side interface specified (--inet-if/-I)")
-   return verbosity, bt_file, conf_file, b4_if, inet_if
+   return verbosity, bt_file, conf_file, b4_if, b4_if_kind, inet_if, inet_if_kind
 end
 
 
 function run(parameters)
-   local verbosity, bt_file, conf_file, b4_if, inet_if = parse_args(parameters)
+   local verbosity, bt_file, conf_file, b4_if, b4_if_kind, inet_if, inet_if_kind = parse_args(parameters)
    local c = config.new()
 
    -- AFTR
@@ -74,21 +89,27 @@ function run(parameters)
    config.app(c, "aftr", LwAftr, aftrconf)
 
    -- B4 side interface
-   config.app(c, "b4if", RawSocket, b4_if)
+   config.app(c, "b4if", b4_if_kind.app, b4_if)
 
    -- Internet interface
-   config.app(c, "inet", RawSocket, inet_if)
+   config.app(c, "inet", inet_if_kind.app, inet_if)
 
    -- Connect apps
-   config.link(c, "inet.tx -> aftr.v4")
-   config.link(c, "b4if.tx -> aftr.v6")
-   config.link(c, "aftr.v4 -> inet.rx")
-   config.link(c, "aftr.v6 -> b4if.rx")
+   config.link(c, "inet." .. inet_if_kind.tx .. " -> aftr.v4")
+   config.link(c, "b4if." .. b4_if_kind.tx .. " -> aftr.v6")
+   config.link(c, "aftr.v4 -> inet." .. inet_if_kind.rx)
+   config.link(c, "aftr.v6 -> b4if." .. b4_if_kind.rx)
 
    if verbosity >= 1 then
       local csv = CSVStatsTimer.new()
-      csv:add_app("inet", {"tx", "rx"}, { tx = "IPv4 TX", rx = "IPv4 RX" })
-      csv:add_app("tob4", {"tx", "rx"}, { tx = "IPv6 TX", rx = "IPv6 RX" })
+      csv:add_app("inet", {"tx", "rx"}, {
+         [inet_if_kind.tx] = "IPv4 TX",
+         [inet_if_kind.rx] = "IPv4 RX"
+      })
+      csv:add_app("b4if", {"tx", "rx"}, {
+         [b4_if_kind.tx] = "IPv6 TX",
+         [b4_if_kind.rx] = "IPv6 RX"
+      })
       csv:activate()
 
       if verbosity >= 2 then
