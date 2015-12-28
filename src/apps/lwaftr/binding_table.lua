@@ -33,7 +33,7 @@ end
 local machine_friendly_binding_table
 
 -- b4_v6 is for the B4, br_v6 is for the border router (lwAFTR)
-local function pton_binding_table(bt)
+function pton_binding_table(bt)
    local pbt = {}
    for _, v in ipairs(bt) do
       local b4_v6 = ipv6:pton(v[1])

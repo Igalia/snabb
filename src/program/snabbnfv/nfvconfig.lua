@@ -5,6 +5,11 @@ local PcapFilter = require("apps.packet_filter.pcap_filter").PcapFilter
 local RateLimiter = require("apps.rate_limiter.rate_limiter").RateLimiter
 local nd_light = require("apps.ipv6.nd_light").nd_light
 local L2TPv3 = require("apps.keyed_ipv6_tunnel.tunnel").SimpleKeyedTunnel
+local ipv4 = require("lib.protocol.ipv4")
+local ipv6 = require("lib.protocol.ipv6")
+local ethernet = require("lib.protocol.ethernet")
+local LwAftr = require("apps.lwaftr.lwaftr").LwAftr
+local LwAftrBT = require("apps.lwaftr.binding_table")
 local pci = require("lib.hardware.pci")
 local ffi = require("ffi")
 local C = ffi.C
@@ -90,6 +95,33 @@ function load (file, pciaddr, sockpath)
          -- Network <-> ND -> Tunnel -> VM
          config.link(c, ND..".north -> "..Tunnel..".encapsulated")
          config.link(c, Tunnel..".decapsulated -> "..VM_rx)
+         VM_rx, VM_tx = ND..".south", ND..".south"
+      end
+      if t.tunnel and t.tunnel.type == "LwAftr" then
+         local Tunnel = name.."_Tunnel"
+         print ("type of binding_table is " .. type(t.tunnel.binding_table))
+         local conf = t.tunnel;
+         conf.binding_table = LwAftrBT.pton_binding_table(t.tunnel.binding_table)
+         conf.aftr_ipv4_ip = ipv4:pton(t.tunnel.ipv4_interface.address)
+         conf.aftr_ipv6_ip = ipv6:pton(t.tunnel.ipv6_interface.address)
+         conf.aftr_mac_b4_side = ethernet:pton(mac_address)
+         conf.aftr_mac_inet_side = ethernet:pton(t.tunnel.ipv4_interface.next_hop_mac)
+         conf.inet_mac = ethernet:pton(t.tunnel.ipv4_interface.next_hop_mac)
+         conf.b4_mac = ethernet:pton(mac_address)
+         config.app(c, Tunnel, LwAftr, conf)
+         -- Setup IPv6 neighbor discovery/solicitation responder.
+         -- This will talk to our local gateway.
+         local ND = name.."_ND"
+         config.app(c, ND, nd_light,
+                    {local_mac = mac_address,
+                     local_ip = t.tunnel.ipv6_interface.address,
+                     next_hop = t.tunnel.ipv6_interface.next_hop})
+         -- VM -> Tunnel -> ND <-> Network
+         config.link(c, VM_tx.." -> "..Tunnel..".v4")
+         config.link(c, Tunnel..".v6 -> "..ND..".north")
+         -- Network <-> ND -> Tunnel -> VM
+         config.link(c, ND..".north -> "..Tunnel..".v6")
+         config.link(c, Tunnel..".v4 -> "..VM_rx)
          VM_rx, VM_tx = ND..".south", ND..".south"
       end
       if t.rx_police_gbps then
