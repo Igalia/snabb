@@ -206,8 +206,7 @@ local function binding_lookup_ipv4(lwstate, ipv4_ip, port)
       local bind = lwstate.binding_table[i]
       if debug then print("CHECK", string.format("%x, %x", bind[2], ipv4_ip)) end
       if bind[2] == ipv4_ip then
-         local psid_info = bind[3]
-         if psid_info.psid == psid then
+         if bind[3] == psid then
             local lwaftr_ipv6 = get_lwAFTR_ipv6(lwstate, bind)
             return bind[1], lwaftr_ipv6
          end
@@ -261,8 +260,7 @@ local function in_binding_table(lwstate, ipv6_src_ip, ipv6_dst_ip, ipv4_src_ip, 
                lwdebug.format_ipv4(C.ntohl(ipv4_src_ip)), ipv4_src_port))
       end
       if bind[2] == ipv4_src_ip then
-         local psid_info = bind[3]
-         if psid_info.psid == psid then
+         if bind[3] == psid then
             if debug then
                print("ipv6bind")
                lwdebug.print_ipv6(bind[1])
