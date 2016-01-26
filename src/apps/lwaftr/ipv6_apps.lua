@@ -2,11 +2,13 @@ module(..., package.seeall)
 
 local constants = require("apps.lwaftr.constants")
 local fragmentv6 = require("apps.lwaftr.fragmentv6")
+local ndp = require("apps.lwaftr.ndp")
 local lwutil = require("apps.lwaftr.lwutil")
 
 local packet = require("core.packet")
 local bit = require("bit")
 local ffi = require("ffi")
+local C = ffi.C
 
 local receive, transmit = link.receive, link.transmit
 local rd16 = lwutil.rd16
@@ -19,6 +21,7 @@ local o_ipv6_dst_addr = constants.o_ipv6_dst_addr
 
 Reassembler = {}
 Fragmenter = {}
+NDP = {}
 
 function Reassembler:new(conf)
    local o = setmetatable({}, {__index=Reassembler})
@@ -144,6 +147,67 @@ function Fragmenter:push ()
          end
       else
          transmit(output, pkt)
+      end
+   end
+end
+
+-- TODO: handle any NS retry policy code here
+function NDP:new(conf)
+   local o = setmetatable({}, {__index=NDP})
+   o.conf = conf
+   -- TODO: verify that the src and dst ipv6 addresses and src mac address
+   -- have been provided, in pton format.
+   if not conf.dst_eth then
+      o.ns_pkt = ndp.form_ns(conf.src_eth, conf.src_ipv6, conf.dst_ipv6)
+      o.do_ns_request = true
+   else
+       o.do_ns_request = false
+   end
+   o.dst_eth = conf.dst_eth -- Intentionally nil if to request by NS
+   return o
+end
+
+function NDP:push()
+   local isouth, osouth = self.input.south, self.output.south
+   local inorth, onorth = self.input.north, self.output.north
+   if self.do_ns_request then
+      self.do_ns_request = false -- TODO: have retries, etc
+      transmit(onorth, packet.clone(self.ns_pkt))
+      -- TODO: do the unsolicited neighbor announcements on start and on
+      -- configuration reloads?
+      -- This would be an optimization, not a correctness issue
+   end
+   for _=1,link.nreadable(isouth) do
+      local p = receive(isouth)
+      if ndp.is_ndp(p) then
+         if not self.dst_eth and ndp.is_solicited_neighbor_announcement(p) then
+            local dst_ethernet = ndp.get_dst_ethernet(p)
+            if dst_ethernet then
+               self.dst_ethernet = dst_ethernet
+            end
+            packet.free(p)
+         elseif ndp.is_neighbor_solicitation(p) then
+            local snap = ndp.form_nsolicitation_reply(self.conf.src_eth, self.conf.src_ipv6, p)
+            if snap then 
+               transmit(osouth, snap)
+            end
+            packet.free(p)
+         else -- incoming NDP that we don't handle; drop it silently
+            packet.free(p)
+         end
+      else
+         transmit(onorth, p)
+      end
+   end
+
+   for _=1,link.nreadable(inorth) do
+      local p = receive(inorth)
+      if not self.dst_eth then
+         -- drop all southbound packets until the next hop's ethernet address is known
+          packet.free(p)
+      else
+          ndp.set_dst_ethernet(p, self.dst_eth)
+          transmit(osouth, p)
       end
    end
 end

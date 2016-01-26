@@ -28,11 +28,11 @@ function snabb_run_and_cmp {
       echo "not enough arguments to snabb_run_and_cmp"
       exit 1
    fi
-   ${SNABB_LWAFTR} check \
-      $1 $2 $3 ${TEST_OUT}/endoutv4.pcap ${TEST_OUT}/endoutv6.pcap || quit_with_msg \
-        "Failure: ${SNABB_LWAFTR} check \
+   (${SNABB_LWAFTR} check \
+      $1 $2 $3 ${TEST_OUT}/endoutv4.pcap ${TEST_OUT}/endoutv6.pcap | grep -v compiled) || 
+   quit_with_msg "Failure: ${SNABB_LWAFTR} check \
          $1 $2 $3 \
-         ${TEST_OUT}/endoutv4.pcap ${TEST_OUT}/endoutv6.pcap"
+         ${TEST_OUT}/endoutv4.pcap ${TEST_OUT}/endoutv6.pcap" 
    scmp $4 ${TEST_OUT}/endoutv4.pcap \
     "Failure: ${SNABB_LWAFTR} check $1 $2 $3 $4 $5"
    scmp $5 ${TEST_OUT}/endoutv6.pcap \
@@ -49,6 +49,11 @@ echo "Testing: from-internet IPv4 packet found in the binding table with vlan ta
 snabb_run_and_cmp ${TEST_BASE}/vlan.conf \
    ${TEST_BASE}/tcp-frominet-bound-vlan.pcap ${EMPTY} \
    ${EMPTY} ${TEST_BASE}/tcp-afteraftr-ipv6-vlan.pcap
+
+echo "Testing: incoming NDP Neighbor Solicitation"
+snabb_run_and_cmp ${TEST_BASE}/tunnel_icmp_withndp.conf \
+   ${EMPTY} ${TEST_BASE}/ndp_incoming_ns.pcap \
+   ${EMPTY} ${TEST_BASE}/ndp_outgoing_solicited_na.pcap
 
 echo "Testing: from-internet IPv4 fragmented packets found in the binding table."
 snabb_run_and_cmp ${TEST_BASE}/icmp_on_fail.conf \
