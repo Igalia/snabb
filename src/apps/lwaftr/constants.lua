@@ -35,6 +35,8 @@ icmpv6_dst_unreachable = 1
 icmpv6_packet_too_big = 2
 icmpv6_time_limit_exceeded = 3
 icmpv6_parameter_problem = 4
+icmpv6_ns = 135
+icmpv6_na = 136
 
 -- ICMPv6 codes
 icmpv6_code_packet_too_big = 0

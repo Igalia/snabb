@@ -24,6 +24,14 @@ local function required_if(key, pred)
    end
 end
 
+local function required_at_least_one_of(key, otherkey)
+   return function(config)
+      if config[otherkey] == nil then
+         error(string.format("At least one of '%s' and '%s' must be specified", key, otherkey))
+      end
+   end
+end
+
 local function default(val)
    return function(config) return val end
 end
@@ -42,6 +50,7 @@ local lwaftr_conf_spec = {
       inet_mac=Parser.parse_mac,
       ipv4_mtu=Parser.parse_mtu,
       ipv6_mtu=Parser.parse_mtu,
+      next_hop_ipv6_addr=Parser.parse_ipv6,
       policy_icmpv4_incoming=Parser.enum_parser(policies),
       policy_icmpv4_outgoing=Parser.enum_parser(policies),
       policy_icmpv6_incoming=Parser.enum_parser(policies),
@@ -59,7 +68,7 @@ local lwaftr_conf_spec = {
       aftr_ipv6_ip=required('aftr_ipv6_ip'),
       aftr_mac_b4_side=required('aftr_mac_b4_side'),
       aftr_mac_inet_side=required('aftr_mac_inet_side'),
-      b4_mac=required('b4_mac'),
+      b4_mac=required_at_least_one_of('b4_mac', 'next_hop_ipv6_addr'),
       binding_table=required('binding_table'),
       hairpinning=default(true),
       icmpv6_rate_limiter_n_packets=default(6e5),
@@ -67,6 +76,7 @@ local lwaftr_conf_spec = {
       inet_mac=required('inet_mac'),
       ipv4_mtu=default(1460),
       ipv6_mtu=default(1500),
+      next_hop_ipv6_addr = required_at_least_one_of('next_hop_ipv6_addr', 'b4_mac'),
       policy_icmpv4_incoming=default(policies.ALLOW),
       policy_icmpv4_outgoing=default(policies.ALLOW),
       policy_icmpv6_incoming=default(policies.ALLOW),

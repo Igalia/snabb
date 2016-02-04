@@ -21,11 +21,20 @@ function print_ipv6(addr)
    print(table.concat(chunks, ':'))
 end
 
-function print_pkt(pkt)
+local function gen_hex_bytes(data, len)
    local fbytes = {}
-   for i=0,pkt.length - 1 do
-      table.insert(fbytes, string.format("0x%x", pkt.data[i]))
+   for i=0,len - 1 do
+      table.insert(fbytes, string.format("0x%x", data[i]))
    end
+   return fbytes
+end
+
+function print_hex(data, len)
+   print(table.concat(gen_hex_bytes(data, len), " "))
+end
+
+function print_pkt(pkt)
+   local fbytes = gen_hex_bytes(pkt.data, pkt.length)
    print(string.format("Len: %i: ", pkt.length) .. table.concat(fbytes, " "))
 end
 

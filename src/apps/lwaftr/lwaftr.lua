@@ -204,7 +204,7 @@ function LwAftr:new(conf)
    -- the lwaftr app, if there is no performance impact.
    o.aftr_ipv4_ip = conf.aftr_ipv4_ip
    o.aftr_ipv6_ip = conf.aftr_ipv6_ip
-   o.aftr_mac_b4_side = conf.aftr_mac_b4_side
+   o.aftr_mac_b4_side = conf.aftr_mac_b4_side or ethernet:pton("00:00:00:00:00:00")
    o.aftr_mac_inet_side = conf.aftr_mac_inet_side
    o.b4_mac = conf.b4_mac
    o.hairpinning = conf.hairpinning
