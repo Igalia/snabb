@@ -19,7 +19,9 @@ function lwaftr_app(c, conf)
 
    config.app(c, "reassemblerv4", ipv4_apps.Reassembler, {})
    config.app(c, "reassemblerv6", ipv6_apps.Reassembler, {})
+   config.app(c, "icmpechov4", ipv4_apps.ICMPEcho, { address = conf.aftr_ipv4_ip })
    config.app(c, 'lwaftr', lwaftr.LwAftr, conf)
+   config.app(c, "icmpechov6", ipv6_apps.ICMPEcho, { address = conf.aftr_ipv6_ip })
    config.app(c, "fragmenterv4", ipv4_apps.Fragmenter,
               { mtu=conf.ipv4_mtu })
    config.app(c, "fragmenterv6", ipv6_apps.Fragmenter,
@@ -47,10 +49,16 @@ function lwaftr_app(c, conf)
       prepend(postprocessing_apps_v6, "egress_filterv6")
    end
 
-   set_preprocessors(c, preprocessing_apps_v4, "lwaftr.v4")
-   set_preprocessors(c, preprocessing_apps_v6, "lwaftr.v6")
-   set_postprocessors(c, "lwaftr.v6", postprocessing_apps_v6)
-   set_postprocessors(c, "lwaftr.v4", postprocessing_apps_v4)
+   set_preprocessors(c, preprocessing_apps_v4, "icmpechov4.south")
+   config.link(c, "icmpechov4.north -> lwaftr.v4")
+   config.link(c, "lwaftr.v4 -> icmpechov4.north")
+
+   set_preprocessors(c, preprocessing_apps_v6, "icmpechov6.south")
+   config.link(c, "icmpechov6.north -> lwaftr.v6")
+   config.link(c, "lwaftr.v6 -> icmpechov6.north")
+
+   set_postprocessors(c, "icmpechov6.south", postprocessing_apps_v6)
+   set_postprocessors(c, "icmpechov4.south", postprocessing_apps_v4)
 end
 
 local function link_apps(c, apps)

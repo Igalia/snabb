@@ -3,13 +3,17 @@ module(..., package.seeall)
 local constants = require("apps.lwaftr.constants")
 local fragmentv6 = require("apps.lwaftr.fragmentv6")
 local lwutil = require("apps.lwaftr.lwutil")
+local icmp = require("apps.lwaftr.icmp")
 
+local ethernet = require("lib.protocol.ethernet")
+local ipv6 = require("lib.protocol.ipv6")
+local checksum = require("lib.checksum")
 local packet = require("core.packet")
 local bit = require("bit")
 local ffi = require("ffi")
 
 local receive, transmit = link.receive, link.transmit
-local rd16 = lwutil.rd16
+local rd16, wr16, htons = lwutil.rd16, lwutil.wr16, lwutil.htons
 local is_fragment = fragmentv6.is_fragment
 
 local ipv6_fixed_header_size = constants.ipv6_fixed_header_size
@@ -19,6 +23,7 @@ local o_ipv6_dst_addr = constants.o_ipv6_dst_addr
 
 Reassembler = {}
 Fragmenter = {}
+ICMPEcho = {}
 
 function Reassembler:new(conf)
    local o = setmetatable({}, {__index=Reassembler})
@@ -145,5 +150,63 @@ function Fragmenter:push ()
       else
          transmit(output, pkt)
       end
+   end
+end
+
+function ICMPEcho:new(conf)
+   local addresses = {}
+   if conf.address then
+      addresses[ffi.string(conf.address, 16)] = true
+   end
+   if conf.addresses then
+      for _, v in ipairs(conf.addresses) do
+         addresses[ffi.string(v, 16)] = true
+      end
+   end
+   return setmetatable({addresses = addresses}, {__index = ICMPEcho})
+end
+
+function ICMPEcho:push()
+   local l_in, l_out, l_reply = self.input.south, self.output.north, self.output.south
+
+   for _ = 1, math.min(link.nreadable(l_in), link.nwritable(l_out)) do
+      local out, pkt = l_out, receive(l_in)
+
+      if icmp.is_icmpv6_message(pkt, constants.icmpv6_echo_request, 0) then
+         local pkt_ipv6 = ipv6:new_from_mem(pkt.data + constants.ethernet_header_size,
+                                            pkt.length - constants.ethernet_header_size)
+         local pkt_ipv6_dst = ffi.string(pkt_ipv6:dst(), 16)
+         if self.addresses[pkt_ipv6_dst] then
+            ethernet:new_from_mem(pkt.data, constants.ethernet_header_size):swap()
+
+            -- Swap IP source/destination
+            pkt_ipv6:dst(pkt_ipv6:src())
+            pkt_ipv6:src(pkt_ipv6_dst)
+
+            -- Change ICMP message type
+            local icmp_offset = constants.ethernet_header_size + constants.ipv6_fixed_header_size
+            pkt.data[icmp_offset + constants.o_icmpv6_msg_type] = constants.icmpv6_echo_reply
+
+            -- Recalculate checksums
+            wr16(pkt.data + icmp_offset + constants.o_icmpv6_checksum, 0)
+            local ph_len = pkt.length - icmp_offset
+            local ph = pkt_ipv6:pseudo_header(ph_len, constants.proto_icmpv6)
+            local csum = checksum.ipsum(ffi.cast("uint8_t*", ph), ffi.sizeof(ph), 0)
+            csum = checksum.ipsum(pkt.data + icmp_offset, 4, bit.bnot(csum))
+            csum = checksum.ipsum(pkt.data + icmp_offset + 4,
+                                  pkt.length - icmp_offset - 4,
+                                  bit.bnot(csum))
+            wr16(pkt.data + icmp_offset + constants.o_icmpv6_checksum, htons(csum))
+
+            out = l_reply
+         end
+      end
+
+      transmit(out, pkt)
+   end
+
+   l_in, l_out = self.input.north, self.output.south
+   for _ = 1, math.min(link.nreadable(l_in), link.nwritable(l_out)) do
+      transmit(l_out, receive(l_in))
    end
 end

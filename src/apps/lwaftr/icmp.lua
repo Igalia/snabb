@@ -15,7 +15,8 @@ local ffi = require("ffi")
 
 local band, bnot = bit.band, bit.bnot
 local C = ffi.C
-local wr16, wr32 = lwutil.wr16, lwutil.wr32
+local rd16, wr16, wr32 = lwutil.rd16, lwutil.wr16, lwutil.wr32
+local get_ihl_from_offset = lwutil.get_ihl_from_offset
 local htons, htonl = lwutil.htons, lwutil.htonl
 local ntohs, ntohl = htons, htonl
 local write_eth_header = lwheader.write_eth_header
@@ -93,6 +94,22 @@ function new_icmpv4_packet(from_eth, to_eth, from_ip, to_ip, initial_pkt, l2_siz
    return new_pkt
 end
 
+function is_icmpv4(pkt)
+   return rd16(pkt.data + constants.o_ethernet_ethertype) == constants.n_ethertype_ipv4
+      and pkt.data[constants.ethernet_header_size + constants.o_ipv4_proto] == constants.proto_icmp
+end
+
+function is_icmpv4_message(pkt, msg_type, msg_code)
+   if is_icmpv4(pkt) then
+      local icmp_offset = constants.ethernet_header_size +
+            get_ihl_from_offset(pkt, constants.ethernet_header_size + constants.o_ipv4_ver_and_ihl)
+      return pkt.data[icmp_offset + constants.o_icmpv4_msg_type] == msg_type
+         and pkt.data[icmp_offset + constants.o_icmpv4_msg_code] == msg_code
+   else
+      return false
+   end
+end
+
 function new_icmpv6_packet(from_eth, to_eth, from_ip, to_ip, initial_pkt, l2_size, config)
    local new_pkt = packet.allocate()
    local dgram = to_datagram(new_pkt)
@@ -116,4 +133,16 @@ function new_icmpv6_packet(from_eth, to_eth, from_ip, to_ip, initial_pkt, l2_siz
 
    ipv6_header:free()
    return new_pkt
+end
+
+function is_icmpv6(pkt)
+   return rd16(pkt.data + constants.o_ethernet_ethertype) == constants.n_ethertype_ipv6
+      and pkt.data[constants.ethernet_header_size + constants.o_ipv6_next_header] == constants.proto_icmpv6
+end
+
+function is_icmpv6_message(pkt, msg_type, msg_code)
+   local icmp_offset = constants.ethernet_header_size + constants.ipv6_fixed_header_size
+   return is_icmpv6(pkt)
+      and pkt.data[icmp_offset + constants.o_icmpv6_msg_type] == msg_type
+      and pkt.data[icmp_offset + constants.o_icmpv4_msg_code] == msg_code
 end

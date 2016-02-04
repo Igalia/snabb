@@ -301,4 +301,17 @@ snabb_run_and_cmp ${TEST_CONF}/no_icmp_with_filters_and_vlan_drop.conf \
    ${TEST_DATA}/tcp-frominet-trafficclass.pcap ${EMPTY} \
    ${EMPTY} ${EMPTY}
 
+echo "Testing: ICMP Echo to AFTR (IPv4)"
+snabb_run_and_cmp ${TEST_CONF}/no_icmp_with_filters_and_vlan_accept.conf \
+	${TEST_DATA}/ping-v4.pcap ${EMPTY} ${TEST_DATA}/ping-v4-reply.pcap ${EMPTY}
+
+echo "Testing: ICMP Echo to AFTR (IPv6)"
+snabb_run_and_cmp ${TEST_CONF}/no_icmp_with_filters_and_vlan_accept.conf \
+	${EMPTY} ${TEST_DATA}/ping-v6.pcap ${EMPTY} ${TEST_DATA}/ping-v6-reply.pcap
+
+echo "Testing: ICMP Echo to AFTR (IPv6) + data"
+snabb_run_and_cmp ${TEST_CONF}/no_icmp_with_filters_and_vlan_accept.conf \
+	${EMPTY} ${TEST_DATA}/ping-v6-and-data.pcap \
+	${TEST_DATA}/decap-ipv4.pcap ${TEST_DATA}/ping-v6-reply.pcap
+
 echo "All end-to-end lwAFTR tests passed."

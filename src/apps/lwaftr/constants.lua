@@ -35,6 +35,8 @@ icmpv6_dst_unreachable = 1
 icmpv6_packet_too_big = 2
 icmpv6_time_limit_exceeded = 3
 icmpv6_parameter_problem = 4
+icmpv6_echo_request = 128
+icmpv6_echo_reply = 129
 
 -- ICMPv6 codes
 icmpv6_code_packet_too_big = 0
@@ -78,8 +80,14 @@ o_ipv6_dst_addr = 24
 o_ipv6_frag_offset = 2
 o_ipv6_frag_id = 4
 
+o_icmpv4_msg_type = 0
+o_icmpv4_msg_code = 1
 o_icmpv4_checksum = 2
 o_icmpv4_echo_identifier = 4
+
+o_icmpv6_msg_type = 0
+o_icmpv6_msg_code = 1
+o_icmpv6_checksum = 2
 
 -- Config values
 default_ttl = 255
