@@ -2,7 +2,6 @@ module(..., package.seeall)
 
 local bt = require("apps.lwaftr.binding_table")
 local constants = require("apps.lwaftr.constants")
-local dump = require('apps.lwaftr.dump')
 local icmp = require("apps.lwaftr.icmp")
 local lwconf = require("apps.lwaftr.conf")
 local lwdebug = require("apps.lwaftr.lwdebug")
@@ -581,8 +580,7 @@ function LwAftr:push ()
             -- fixes it, but it's quite a big hammer!
             require('jit').flush()
          elseif msg.kind == messages.lwaftr_message_dump_config then
-            dump.dump_configuration(self)
-            dump.dump_binding_table(self)
+            -- TODO: Dump configuration and binding table to a file.
          else
             print('Unhandled message: '..tostring(msg))
          end
