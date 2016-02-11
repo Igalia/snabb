@@ -273,8 +273,37 @@ function pace_breathing ()
    end
 end
 
+local jitter_min_breath
+local jitter_max_breath
+local jitter_breath_count
+local jitter_total_elapsed
+local function reset_jitter()
+   jitter_min_breath = 1/0
+   jitter_max_breath = 0
+   jitter_breath_count = 0
+   jitter_total_elapsed = 0
+end
+reset_jitter()
+
+local function record_jitter(elapsed)
+   if elapsed < jitter_min_breath then jitter_min_breath = elapsed end
+   if elapsed > jitter_max_breath then jitter_max_breath = elapsed end
+   jitter_breath_count = jitter_breath_count + 1
+   jitter_total_elapsed = jitter_total_elapsed + elapsed
+end
+
+local function report_jitter()
+   print(string.format('%fus min / %fus max / %fus avg',
+                       jitter_min_breath * 1e6,
+                       jitter_max_breath * 1e6,
+                       jitter_total_elapsed / jitter_breath_count * 1e6))
+   reset_jitter()
+end
+
 function breathe ()
-   monotonic_now = C.get_monotonic_time()
+   local now = C.get_monotonic_time()
+   record_jitter(now - monotonic_now)
+   monotonic_now = now
    -- Restart: restart dead apps
    restart_dead_apps()
    -- Inhale: pull work into the app network
@@ -310,7 +339,12 @@ function breathe ()
    until not progress  -- Stop after no link had new data
    counter.add(breaths)
    -- Commit counters at a reasonable frequency
-   if counter.read(breaths) % 100 == 0 then counter.commit() end
+   if counter.read(breaths) % 100 == 0 then
+      counter.commit()
+   end
+   if counter.read(breaths) % 10000 == 0 then
+      report_jitter()
+   end
 end
 
 function report (options)
