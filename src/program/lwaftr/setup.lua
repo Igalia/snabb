@@ -102,14 +102,32 @@ function set_postprocessors(c, src, apps)
    link_apps(c, apps)
 end
 
-function link_source(c, v4_in, v6_in)
-   config.link(c, v4_in..' -> reassemblerv4.input')
-   config.link(c, v6_in..' -> reassemblerv6.input')
+function link_source(c, conf, v4_in, v6_in)
+   if conf.vlan_tagging then
+      config.app(c, "untagv4", vlan.Untagger, { tag=conf.v4_vlan_tag })
+      config.app(c, "untagv6", vlan.Untagger, { tag=conf.v6_vlan_tag })
+      config.link(c, v4_in..' -> untagv4.input')
+      config.link(c, v6_in..' -> untagv6.input')
+      config.link(c, 'untagv4.output -> reassemblerv4.input')
+      config.link(c, 'untagv6.output -> reassemblerv6.input')
+   else
+      config.link(c, v4_in..' -> reassemblerv4.input')
+      config.link(c, v6_in..' -> reassemblerv6.input')
+   end
 end
 
-function link_sink(c, v4_out, v6_out)
-   config.link(c, 'fragmenterv4.output -> '..v4_out)
-   config.link(c, 'fragmenterv6.output -> '..v6_out)
+function link_sink(c, conf, v4_out, v6_out)
+   if conf.vlan_tagging then
+      config.app(c, "tagv4", vlan.Tagger, { tag=conf.v4_vlan_tag })
+      config.app(c, "tagv6", vlan.Tagger, { tag=conf.v6_vlan_tag })
+      config.link(c, 'fragmenterv4.output -> tagv4.input')
+      config.link(c, 'fragmenterv6.output -> tagv6.input')
+      config.link(c, 'tagv4.output -> '..v4_out)
+      config.link(c, 'tagv6.output -> '..v6_out)
+   else
+      config.link(c, 'fragmenterv4.output -> '..v4_out)
+      config.link(c, 'fragmenterv6.output -> '..v6_out)
+   end
 end
 
 function load_phy(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci)
@@ -137,15 +155,13 @@ function load_virt(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci)
 
    config.app(c, v4_nic_name, VirtioNet, {
       pciaddr=v4_nic_pci,
-      vlan=conf.vlan_tagging and conf.v4_vlan_tag,
       macaddr=ethernet:ntop(conf.aftr_mac_inet_side)})
    config.app(c, v6_nic_name, VirtioNet, {
       pciaddr=v6_nic_pci,
-      vlan=conf.vlan_tagging and conf.v6_vlan_tag,
       macaddr = ethernet:ntop(conf.aftr_mac_b4_side)})
 
-   link_source(c, v4_nic_name..'.tx', v6_nic_name..'.tx')
-   link_sink(c, v4_nic_name..'.rx', v6_nic_name..'.rx')
+   link_source(c, conf, v4_nic_name..'.tx', v6_nic_name..'.tx')
+   link_sink(c, conf, v4_nic_name..'.rx', v6_nic_name..'.rx')
 end
 
 function load_bench(c, conf, v4_pcap, v6_pcap, v4_sink, v6_sink)
@@ -155,24 +171,14 @@ function load_bench(c, conf, v4_pcap, v6_pcap, v4_sink, v6_sink)
    config.app(c, "capturev6", pcap.PcapReader, v6_pcap)
    config.app(c, "repeaterv4", basic_apps.Repeater)
    config.app(c, "repeaterv6", basic_apps.Repeater)
-   if conf.vlan_tagging then
-      config.app(c, "untagv4", vlan.Untagger, { tag=conf.v4_vlan_tag })
-      config.app(c, "untagv6", vlan.Untagger, { tag=conf.v6_vlan_tag })
-   end
    config.app(c, v4_sink, basic_apps.Sink)
    config.app(c, v6_sink, basic_apps.Sink)
 
    config.link(c, "capturev4.output -> repeaterv4.input")
    config.link(c, "capturev6.output -> repeaterv6.input")
 
-   if conf.vlan_tagging then
-      config.link(c, "repeaterv4.output -> untagv4.input")
-      config.link(c, "repeaterv6.output -> untagv6.input")
-      link_source(c, 'untagv4.output', 'untagv6.output')
-   else
-      link_source(c, 'repeaterv4.output', 'repeaterv6.output')
-   end
-   link_sink(c, v4_sink..'.input', v6_sink..'.input')
+   link_source(c, conf, 'repeaterv4.output', 'repeaterv6.output')
+   link_sink(c, conf, v4_sink..'.input', v6_sink..'.input')
 end
 
 function load_check(c, conf, inv4_pcap, inv6_pcap, outv4_pcap, outv6_pcap)
@@ -182,23 +188,6 @@ function load_check(c, conf, inv4_pcap, inv6_pcap, outv4_pcap, outv6_pcap)
    config.app(c, "capturev6", pcap.PcapReader, inv6_pcap)
    config.app(c, "output_filev4", pcap.PcapWriter, outv4_pcap)
    config.app(c, "output_filev6", pcap.PcapWriter, outv6_pcap)
-   if conf.vlan_tagging then
-      config.app(c, "untagv4", vlan.Untagger, { tag=conf.v4_vlan_tag })
-      config.app(c, "untagv6", vlan.Untagger, { tag=conf.v6_vlan_tag })
-      config.app(c, "tagv4", vlan.Tagger, { tag=conf.v4_vlan_tag })
-      config.app(c, "tagv6", vlan.Tagger, { tag=conf.v6_vlan_tag })
-   end
-
-   if conf.vlan_tagging then
-      config.link(c, "capturev4.output -> untagv4.input")
-      config.link(c, "capturev6.output -> untagv6.input")
-      link_source(c, 'untagv4.output', 'untagv6.output')
-
-      link_sink(c, 'tagv4.input', 'tagv6.input')
-      config.link(c, "tagv4.output -> output_filev4.input")
-      config.link(c, "tagv6.output -> output_filev6.input")
-   else
-      link_source(c, 'capturev4.output', 'capturev6.output')
-      link_sink(c, 'output_filev4.input', 'output_filev6.input')
-   end
+   link_source(c, conf, 'capturev4.output', 'capturev6.output')
+   link_sink(c, conf, 'output_filev4.input', 'output_filev6.input')
 end
