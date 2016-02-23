@@ -19,7 +19,7 @@ function parse_args(args)
       assert(opts.duration >= 0, "duration can't be negative")
    end
    function handlers.h() show_usage(0) end
-   args = lib.dogetopt(args, handlers, "hD:", { help="h", duration="D" })
+   args = lib.dogetopt(args, handlers, "hD:", { help="h", duration="D", })
    if #args ~= 3 then show_usage(1) end
    return opts, unpack(args)
 end
@@ -37,6 +37,5 @@ function run(args)
    csv:add_app('sinkv6', { 'input' }, { input='Encapsulation' })
    csv:activate()
 
-   app.busywait = true
    app.main({duration=opts.duration})
 end
