@@ -81,7 +81,7 @@ local function map_ptr(fd, len, type)
 end
 
 local function create_ptr(name, type, ...)
-   local path = mkdir_p(S.getpid(), name)
+   local path = mkdir_p(build_path(S.getpid(), name))
    local len = ffi.sizeof(type, ...)
    local fd, err = S.open(path, "creat, rdwr", '0664')
    if not fd then

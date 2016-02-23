@@ -41,7 +41,7 @@ function run(args)
 
    if opts.measure_latency then
       -- Record breathe() latencies between a range of 1us and 1s
-      local latency = require('lib.histogram').new(1e-6, 1e0)
+      local latency = require('lib.histogram').create('bench/breaths', 1e-6, 1e0)
       app.breathe = latency:wrap_thunk(app.breathe, app.now)
       local function report() latency:report(); latency:clear() end
       timer.activate(timer.new("latency", report, 10e9, 'repeating'))
