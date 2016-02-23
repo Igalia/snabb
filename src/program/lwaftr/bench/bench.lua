@@ -19,7 +19,9 @@ function parse_args(args)
       assert(opts.duration >= 0, "duration can't be negative")
    end
    function handlers.h() show_usage(0) end
-   args = lib.dogetopt(args, handlers, "hD:", { help="h", duration="D" })
+   handlers["measure-latency"] = function() opts.measure_latency = true end
+   args = lib.dogetopt(args, handlers, "hD:",
+                       { help="h", duration="D", ["measure-latency"]=0 })
    if #args ~= 3 then show_usage(1) end
    return opts, unpack(args)
 end
@@ -37,6 +39,13 @@ function run(args)
    csv:add_app('sinkv6', { 'input' }, { input='Encapsulation' })
    csv:activate()
 
-   app.busywait = true
+   if opts.measure_latency then
+      -- Record breathe() latencies between a range of 1us and 1s
+      local latency = require('lib.histogram').new(1e-6, 1e0)
+      app.breathe = latency:wrap_thunk(app.breathe, app.now)
+      local function report() latency:report(); latency:clear() end
+      timer.activate(timer.new("latency", report, 10e9, 'repeating'))
+   end
+
    app.main({duration=opts.duration})
 end
