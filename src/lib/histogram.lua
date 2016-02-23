@@ -5,6 +5,15 @@
 --     Make a new histogram, with buckets covering the range from MIN to MAX.
 --     The range between MIN and MAX will be divided logarithmically.
 --
+--   histogram.create(name, min, max) => histogram
+--     Create a histogram as in new(), but also map it into
+--     /var/run/snabb/PID/NAME, exposing it for analysis by other processes.
+--     Any existing content in the file is cleared.  If the file exists already,
+--     it will be cleared.
+--
+--   histogram.open(pid, name) => histogram
+--     Open a histogram mapped as /var/run/snabb/PID/NAME.
+--
 --   histogram.add(histogram, measurement)
 --     Add a measurement to a histogram.
 --
@@ -28,6 +37,77 @@ module(...,package.seeall)
 
 local app  = require("core.app")
 local ffi = require("ffi")
+local S = require("syscall")
+local log, floor, max, min = math.log, math.floor, math.max, math.min
+
+-- First, some private helpers to let us map histograms into shared
+-- memory so that other processes can analyze them.
+
+-- Create /var/run/snabb with mode "rwxrwxrwt" (R/W for all and sticky)
+-- if it does not exist yet.
+root = "/var/run/snabb"
+local function ensure_root()
+   if not S.stat(root) then
+      local mask = S.umask(0)
+      local status, err = S.mkdir(root, "01777")
+      assert(status, ("Unable to create %s: %s"):format(
+                root, tostring(err or "unspecified error")))
+      S.umask(mask)
+   end
+   return root
+end
+
+local function build_path(...) return table.concat({ ... }, '/') end
+
+-- Given the name "foo/bar/baz", create /var/run/snabb/foo and
+-- /var/run/snabb/foo/bar.
+local function mkdir_p (name)
+   local path = ensure_root()
+   local function match(x)
+      S.mkdir(path, "rwxu");
+      path = build_path(path, x)
+   end
+   name:gsub("([^/]+)", match)
+   return path
+end
+
+local function map_ptr(fd, len, type)
+   local mem, err = S.mmap(nil, len, "read, write", "shared", fd, 0)
+   fd:close()
+   if mem == nil then error("mmap failed: " .. tostring(err)) end
+   local ret = ffi.cast(ffi.typeof("$*", type), mem)
+   ffi.gc(ret, function (ptr) S.munmap(ptr, len) end)
+   return ret
+end
+
+local function create_ptr(name, type, ...)
+   local path = mkdir_p(S.getpid(), name)
+   local len = ffi.sizeof(type, ...)
+   local fd, err = S.open(path, "creat, rdwr", '0664')
+   if not fd then
+      local err = tostring(err or "unknown error")
+      error('error creating file "'..path..'": '..err)
+   end
+   assert(fd:ftruncate(len), "ftruncate failed")
+   return map_ptr(fd, len, type)
+end
+
+local function open_ptr(name, pid, type, ...)
+   local path = build_path(root, pid, name)
+   local fd, err = S.open(path, "rdwr")
+   if not fd then
+      local err = tostring(err or "unknown error")
+      error('error opening file "'..path..'": '..err)
+   end
+   local stat = S.fstat(fd)
+   local len = stat and stat.size
+   if len ~= ffi.sizeof(type, ...) then
+      error("unexpected size for file: "..path)
+   end
+   return map_ptr(fd, len, type)
+end
+
+-- Now the histogram code.
 
 -- Fill a 4096-byte page with buckets.  4096/8 = 512, minus the three
 -- header words means 509 buckets.  The first and last buckets are catch-alls.
@@ -38,16 +118,30 @@ local histogram_t = ffi.typeof([[struct {
    uint64_t buckets[509];
 }]])
 
-function new(minimum, maximum)
+local function compute_growth_factor_log(minimum, maximum)
    assert(minimum > 0)
    assert(maximum > minimum)
    -- 507 buckets for precise steps within minimum and maximum, 2 for
    -- the catch-alls.
-   local growth_factor_log = math.log(maximum / minimum) / 507
-   return histogram_t(minimum, growth_factor_log)
+   return log(maximum / minimum) / 507
 end
 
-local log, floor, max, min = math.log, math.floor, math.max, math.min
+function new(minimum, maximum)
+   return histogram_t(minimum, compute_growth_factor_log(minimum, maximum))
+end
+
+function create(name, minimum, maximum)
+   local histogram = create_ptr(name, histogram_t)
+   histogram.minimum = minimum
+   histogram.growth_factor_log = compute_growth_factor_log(minimum, maximum)
+   histogram:clear()
+   return histogram
+end
+
+function open(pid, name)
+   return open_ptr(name, pid, histogram_t)
+end
+
 function add(histogram, measurement)
    local bucket
    if measurement <= 0 then
