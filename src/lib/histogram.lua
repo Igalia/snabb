@@ -161,7 +161,7 @@ function report(histogram, prev)
    local lo, hi = 0, histogram.minimum
    local factor = math.exp(histogram.growth_factor_log)
    local total = histogram.count
-   if prev then total = total - prev.total end
+   if prev then total = total - prev.count end
    total = tonumber(total)
    for bucket = 0, 508 do
       local count = histogram.buckets[bucket]
@@ -174,9 +174,29 @@ function report(histogram, prev)
    end
 end
 
+function summarize(histogram, prev)
+   local lo, hi = 0, histogram.minimum
+   local factor = math.exp(histogram.growth_factor_log)
+   local total = histogram.count
+   if prev then total = total - prev.count end
+   total = tonumber(total)
+   local min, max, cumulative = 1/0, 0, 0
+   for bucket = 0, 508 do
+      local count = histogram.buckets[bucket]
+      if prev then count = count - prev.buckets[bucket] end
+      if count ~= 0 then
+         if lo < min then min = lo end
+         if hi > max then max = hi end
+         cumulative = cumulative + (lo + hi) / 2 * tonumber(count)
+      end
+      lo, hi = hi, hi * factor
+   end
+   return min, cumulative / total, max
+end
+
 function snapshot(a, b)
    b = b or histogram_t()
-   ffi.copy(b, a, ffi.sizeof(a))
+   ffi.copy(b, a, ffi.sizeof(histogram_t))
    return b
 end
 
@@ -196,6 +216,7 @@ end
 ffi.metatype(histogram_t, {__index = {
    add = add,
    report = report,
+   summarize = summarize,
    snapshot = snapshot,
    wrap_thunk = wrap_thunk,
    clear = clear
@@ -218,6 +239,7 @@ function selftest ()
 
    assert(h.count == 4)
    assert(h:snapshot().count == 4)
+   assert(h:snapshot().buckets[508] == 1)
 
    h:report()
 
