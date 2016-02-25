@@ -241,7 +241,6 @@ function main (options)
    if options.measure_latency or options.measure_latency == nil then
       local histogram = require('lib.histogram')
       local latency = histogram.create('engine/latency', 1e-6, 1e0)
-      print('hi')
       breathe = latency:wrap_thunk(breathe, now)
    end
 
