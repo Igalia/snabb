@@ -159,19 +159,15 @@ function add(histogram, measurement)
 end
 
 function report(histogram, prev)
-   local lo, hi = 0, histogram.minimum
-   local factor = math.exp(histogram.growth_factor_log)
    local total = histogram.count
    if prev then total = total - prev.count end
    total = tonumber(total)
-   for bucket = 0, (num_buckets - 1) do
-      local count = histogram.buckets[bucket]
-      if prev then count = count - prev.buckets[bucket] end
-      if count ~= 0 then
-         print(string.format('%.3e - %.3e: %u (%.5f%%)', lo, hi, tonumber(count),
-                             tonumber(count) / total * 100.))
+   for bval, idx, lo, hi, total_count in histogram do
+      if prev then bval = bval - prev.buckets[idx] end
+      if bval ~= 0 then
+         print(string.format('%.3e - %.3e: %u (%.5f%%)', lo, hi, tonumber(bval),
+                             tonumber(bval) / total * 100.))
       end
-      lo, hi = hi, hi * factor
    end
 end
 
@@ -310,8 +306,8 @@ function selftest ()
 
    h:report()
 
-   for bucket_val, lo, hi, count in h:iterate() do
-      print('bucket_val, lo, hi, count:', bucket_val, lo, hi, count)
+   for bucket_val, idx, lo, hi, count in h:iterate() do
+      print('bucket_val, idx, lo, hi, count:', bucket_val, idx, lo, hi, count)
    end
 
    h:clear()
