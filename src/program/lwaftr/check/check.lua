@@ -3,6 +3,7 @@ module(..., package.seeall)
 local app = require("core.app")
 local config = require("core.config")
 local lib = require("core.lib")
+local log = require("apps.lwaftr.log")
 local setup = require("program.lwaftr.setup")
 
 function show_usage(code)
@@ -12,8 +13,19 @@ end
 
 function parse_args(args)
    local handlers = {}
+   handlers["log-level"] = function (arg)
+      if not arg then
+         log.fatal("No parameter passed to '--log-level'")
+         main.exit(1)
+      end
+      if not log[arg] then
+         log.fatal("Invalid log level '${}'", arg)
+         main.exit(1)
+      end
+      log.level = arg
+   end
    function handlers.h() show_usage(0) end
-   args = lib.dogetopt(args, handlers, "h", { help="h" })
+   args = lib.dogetopt(args, handlers, "h", { help="h", ["log-level"] = 1 })
    if #args ~= 5 then show_usage(1) end
    return unpack(args)
 end

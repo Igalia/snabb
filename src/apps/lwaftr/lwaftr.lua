@@ -1,5 +1,7 @@
 module(..., package.seeall)
 
+local log = require("apps.lwaftr.log")
+
 local bt = require("apps.lwaftr.binding_table")
 local constants = require("apps.lwaftr.constants")
 local dump = require('apps.lwaftr.dump')
@@ -205,7 +207,7 @@ function LwAftr:new(conf)
    o.control = channel.create('lwaftr/control', messages.lwaftr_message_t)
 
    transmit_icmpv6_with_rate_limit = init_transmit_icmpv6_with_rate_limit(o)
-   if debug then lwdebug.pp(conf) end
+   log.debug("config ${%pp}", conf)
    return o
 end
 
@@ -215,6 +217,7 @@ local function decrement_ttl(pkt)
    local old_ttl = ipv4_header[o_ipv4_ttl]
    if old_ttl == 0 then return 0 end
    local new_ttl = band(old_ttl - 1, 0xff)
+   log.trace("old_ttl: %d, new_ttl: %d", old_ttl, new_ttl)
    ipv4_header[o_ipv4_ttl] = new_ttl
    -- Now fix up the checksum.  o_ipv4_ttl is the first byte in the
    -- 16-bit big-endian word, so the difference to the overall sum is
@@ -232,18 +235,13 @@ end
 -- https://www.ietf.org/id/draft-farrer-softwire-br-multiendpoints-01.txt
 -- Return the IPv6 address of the B4 and the AFTR.
 local function binding_lookup_ipv4(lwstate, ipv4_ip, port)
-   if debug then
-      print(lwdebug.format_ipv4(ipv4_ip), 'port: ', port, string.format("%x", port))
-      lwdebug.pp(lwstate.binding_table)
-   end
+   log.debug("${%ipv4} port: ${~%d} (${%x})", ipv4_ip, port)
+   log.debug("Binding table:\n${%pp}", lwstate.binding_table)
    local val = lwstate.binding_table:lookup(ipv4_ip, port)
    if val then
       return val.b4_ipv6, lwstate.binding_table:get_br_address(val.br)
    end
-   if debug then
-      print("Nothing found for ipv4:port", lwdebug.format_ipv4(ipv4_ip),
-      string.format("%i (0x%x)", port, port))
-   end
+   log.debug("nothing found for ${.%ipv4}:${%i} (0x${%x})", ipv4_ip, port)
 end
 
 local function ipv4_in_binding_table(lwstate, ip)
@@ -334,7 +332,7 @@ local function cannot_fragment_df_packet_error(lwstate, pkt)
    -- According to RFC 791, the original packet must be discarded.
    -- Return a packet with ICMP(3, 4) and the appropriate MTU
    -- as per https://tools.ietf.org/html/rfc2473#section-7.2
-   if debug then lwdebug.print_pkt(pkt) end
+   log.trace("packet ${%packet}", pkt)
    -- The ICMP packet should be set back to the packet's source.
    local dst_ip = get_ipv4_src_address_ptr(get_ethernet_payload(pkt))
    local icmp_config = {
@@ -366,7 +364,7 @@ local function encapsulate_and_transmit(lwstate, pkt, ipv6_dst, ipv6_src)
       return transmit_ipv4_reply(lwstate, reply, pkt)
    end
 
-   if debug then print("ipv6", ipv6_src, ipv6_dst) end
+   log.debug("IPv6 src: ${.%ipv6}, dst: ${.%ipv6}", ipv6_src, ipv6_dst)
 
    local next_hdr_type = proto_ipv4
    local ether_src = lwstate.aftr_mac_b4_side
@@ -385,10 +383,7 @@ local function encapsulate_and_transmit(lwstate, pkt, ipv6_dst, ipv6_src)
    write_ipv6_header(l3_header, ipv6_src, ipv6_dst,
                      dscp_and_ecn, next_hdr_type, payload_length)
 
-   if debug then
-      print("encapsulated packet:")
-      lwdebug.print_pkt(pkt)
-   end
+   log.trace("encapsulated packet ${%packet}", pkt)
 
    return transmit(lwstate.o6, pkt)
 end
@@ -409,7 +404,7 @@ local function flush_encapsulation(lwstate)
          encapsulate_and_transmit(lwstate, pkt, ipv6_dst, ipv6_src)
       else
          -- Lookup failed.
-         if debug then print("lookup failed") end
+         log.debug("lookup failed")
          drop_ipv4_packet_to_unreachable_host(lwstate, pkt)
       end
    end
@@ -580,6 +575,8 @@ end
 
 -- FIXME: Verify that the packet length is big enough?
 local function from_b4(lwstate, pkt)
+   log.debug("packet ${}", pkt)
+   log.trace("packet ${%packet}", pkt)
    local ipv6_header = get_ethernet_payload(pkt)
    local proto = get_ipv6_next_header(ipv6_header)
 
@@ -641,7 +638,7 @@ function LwAftr:push ()
       local msg = self.control:pop()
       if msg then
          if msg.kind == messages.lwaftr_message_reload then
-            print('Reloading binding table.')
+            log.info("Reloading binding table.")
             self.binding_table = bt.load(self.conf.binding_table)
             -- We don't know why yet, but something about reloading a
             -- binding table makes LuaJIT switch to side traces instead
@@ -652,7 +649,7 @@ function LwAftr:push ()
             dump.dump_configuration(self)
             dump.dump_binding_table(self)
          else
-            print('Unhandled message: '..tostring(msg))
+            log.warn("Unhandled message: ${}", msg)
          end
       end
    end
@@ -664,8 +661,10 @@ function LwAftr:push ()
       -- that's not IPv6.
       local pkt = receive(i6)
       if is_ipv6(pkt) then
+         log.debug("received IPv6 packet from B4")
          from_b4(self, pkt)
       else
+         log.debug("received non-IPv6 packet from B4 (dropped)")
          drop(pkt)
       end
    end

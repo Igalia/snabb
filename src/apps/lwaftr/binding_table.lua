@@ -70,6 +70,7 @@ local lwdebug = require("apps.lwaftr.lwdebug")
 local Parser = require("apps.lwaftr.conf_parser").Parser
 local rangemap = require("apps.lwaftr.rangemap")
 local phm = require("apps.lwaftr.podhashmap")
+local log = require("apps.lwaftr.log")
 
 local band, bor, bxor, lshift, rshift = bit.band, bit.bor, bit.bxor, bit.lshift, bit.rshift
 
@@ -401,15 +402,10 @@ function load_source(text_stream)
    return parse_binding_table(Parser.new(text_stream))
 end
 
-local verbose = os.getenv('SNABB_LWAFTR_VERBOSE') or true
-local function log(msg, ...)
-   if verbose then print(msg:format(...)) end
-end
-
 function load(file)
    local source = stream.open_input_byte_stream(file)
    if has_magic(source) then
-      log('loading compiled binding table from %s', file)
+      log.info('loading compiled binding table from ${%q}', file)
       return load_compiled(source)
    end
 
@@ -422,26 +418,26 @@ function load(file)
                                  compiled_file)
    if compiled_stream then
       if has_magic(compiled_stream) then
-         log('loading compiled binding table from %s', compiled_file)
+         log.info('loading compiled binding table from ${%q}', compiled_file)
          if is_fresh(compiled_stream, source.mtime_sec, source.mtime_nsec) then
-            log('compiled binding table %s is up to date.', compiled_file)
+            log.info('compiled binding table ${%q} is up to date.', compiled_file)
             return load_compiled(compiled_stream)
          end
-         log('compiled binding table %s is out of date; recompiling.',
+         log.info('compiled binding table ${%q} is out of date; recompiling.',
              compiled_file)
       end
       compiled_stream:close()
    end
       
    -- Load and compile it.
-   log('loading source binding table from %s', file)
+   log.info('loading source binding table from ${%q}', file)
    local bt = load_source(source:as_text_stream())
 
    -- Save it, if we can.
    local success, err = pcall(bt.save, bt, compiled_file,
                               source.mtime_sec, source.mtime_nsec)
    if not success then
-      log('error saving compiled binding table %s: %s', compiled_file, err)
+      log.error('cannot save compiled binding table ${%q}: ${}', compiled_file, err)
    end
 
    -- Done.

@@ -11,5 +11,7 @@ Optional arguments:
        --ring-buffer-size <size>  Set Intel 82599 receive buffer size
        --cpu    <cpu>           Bind the lwAFTR to the given CPU
        --real-time              Enable real-time SCHED_FIFO scheduler
+       --log-level <level>      Set logging amount (default: warn, available:
+                                trace, debug, info, warn, error, fatal).
        -D       <seconds>       Duration in seconds
        -v                       Verbose (repeat for more verbosity)

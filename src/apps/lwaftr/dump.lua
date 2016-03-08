@@ -3,6 +3,7 @@ module(..., package.seeall)
 local ethernet = require("lib.protocol.ethernet")
 local ipv6 = require("lib.protocol.ipv6")
 local ipv4 = require("lib.protocol.ipv4")
+local log = require("apps.lwaftr.log")
 
 local CONF_FILE_DUMP = "/tmp/lwaftr-%s.conf"
 local BINDING_TABLE_FILE_DUMP = "/tmp/binding-%s.table"
@@ -31,7 +32,7 @@ local function ipv4number_to_str(ip)
 end
 
 function dump_configuration(lwstate)
-   print("Dump configuration")
+   log.info("Dump configuration...")
    local result = {}
    local etharr = set('aftr_mac_b4_side', 'aftr_mac_inet_side', 'next_hop6_mac', 'inet_mac')
    local ipv4arr = set('aftr_ipv4_ip')
@@ -52,11 +53,11 @@ function dump_configuration(lwstate)
    local filename = (CONF_FILE_DUMP):format(os.date("%Y-%m-%d-%H:%M:%S"))
    local content = table.concat(result, "\n")
    write_to_file(filename, content)
-   print(("Configuration written to %s"):format(filename))
+   log.info("Configuration written to ${%q}", filename)
 end
 
 function dump_binding_table(lwstate)
-   print("Dump binding table")
+   log.info("Dump binding table...")
    local content = {}
    local function write(str)
       table.insert(content, str)
@@ -85,5 +86,5 @@ function dump_binding_table(lwstate)
    -- Dump content to file
    local filename = (BINDING_TABLE_FILE_DUMP):format(os.date("%Y-%m-%d-%H:%M:%S"))
    write_to_file(filename, dump())
-   print(("Binding table written to %s"):format(filename))
+   log.info("Binding table written to ${%q}", filename)
 end

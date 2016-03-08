@@ -2,6 +2,8 @@ Usage: bench CONF IPV4-IN.PCAP IPV6-IN.PCAP
 
   -h, --help
                              Print usage information.
+  --log-level <level>        Set logging amount (default: warn, available:
+                             trace, debug, info, warn, error, fatal).
 
 Run the lwAFTR with input from IPV4-IN.PCAP and IPV6-IN.PCAP. The bench
 command is used to get an idea of the raw speed of the lwaftr without

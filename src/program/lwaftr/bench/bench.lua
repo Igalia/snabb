@@ -3,6 +3,7 @@ module(..., package.seeall)
 local app = require("core.app")
 local config = require("core.config")
 local lib = require("core.lib")
+local log = require("apps.lwaftr.log")
 local csv_stats  = require("program.lwaftr.csv_stats")
 local setup = require("program.lwaftr.setup")
 
@@ -19,7 +20,18 @@ function parse_args(args)
       assert(opts.duration >= 0, "duration can't be negative")
    end
    function handlers.h() show_usage(0) end
-   args = lib.dogetopt(args, handlers, "hD:", { help="h", duration="D" })
+   handlers["log-level"] = function (arg)
+      if not arg then
+         log.fatal("No parameter passed to '--log-level'")
+         main.exit(1)
+      end
+      if not log[arg] then
+         log.fatal("Invalid log level '${}'", arg)
+         main.exit(1)
+      end
+      log.level = arg
+   end
+   args = lib.dogetopt(args, handlers, "hD:", { help="h", duration="D", ["log-level"] = 1 })
    if #args ~= 3 then show_usage(1) end
    return opts, unpack(args)
 end

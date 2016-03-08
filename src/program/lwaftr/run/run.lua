@@ -3,6 +3,7 @@ module(..., package.seeall)
 local S          = require("syscall")
 local config     = require("core.config")
 local csv_stats  = require("program.lwaftr.csv_stats")
+local log        = require("apps.lwaftr.log")
 local lib        = require("core.lib")
 local setup      = require("program.lwaftr.setup")
 
@@ -96,12 +97,17 @@ function parse_args(args)
          fatal("ring size is not a power of two: " .. arg)
       end
    end
+   handlers["log-level"] = function (arg)
+      if not arg then fatal("No argument passed to '--log-level'") end
+      if not log[arg] then fatal(("Invalid log level '%s'"):format(arg)) end
+      log.level = arg
+   end
    function handlers.h() show_usage(0) end
    lib.dogetopt(args, handlers, "b:c:n:m:vD:hir:",
       { conf = "c", ["v4-pci"] = "n", ["v6-pci"] = "m",
         verbose = "v", duration = "D", help = "h",
         virtio = "i", ["ring-buffer-size"] = "r", cpu = 1,
-        ["real-time"] = 0 })
+        ["real-time"] = 0, ["log-level"] = 1 })
    if ring_buffer_size ~= nil then
       if opts.virtio_net then
          fatal("setting --ring-buffer-size does not work with --virtio")
