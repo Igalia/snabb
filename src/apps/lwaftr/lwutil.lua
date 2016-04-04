@@ -69,3 +69,8 @@ end
 function is_ipv4(pkt)
    return rd16(pkt.data + o_ethernet_ethertype) == n_ethertype_ipv4
 end
+
+-- This does not deal with vlans
+function set_dst_ethernet(pkt, dst_eth)
+   ffi.copy(pkt.data, dst_eth, 6)
+end
