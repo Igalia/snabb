@@ -62,7 +62,7 @@ local ethernet_hlen = 6
 local ipv4_plen = 4
 local arp_eth_ipv4_size = 28
 local ethertype_arp = 0x0806
-local n_ethertype_arp = C.htons(0x0806)
+local n_ethertype_arp = C.htons(ethertype_arp)
 
 local o_htype = 0
 local o_ptype = 2
@@ -74,7 +74,6 @@ local o_spa = 14
 local o_tha = 18
 local o_tpa = 24
 
--- TODO: audit for byte order assumptions...
 local function write_arp(pkt, oper, local_eth, local_ipv4, remote_eth, remote_ipv4)
    wr16(pkt.data + o_htype, ethernet_htype)
    wr16(pkt.data + o_ptype, ipv4_ptype)
@@ -113,6 +112,7 @@ function form_reply(local_eth, local_ipv4, arp_request_pkt)
 end
 
 function is_arp(p)
+   if p.length < ethernet_header_size + arp_eth_ipv4_size then return false end
    return rd16(p.data + o_ethernet_ethertype) == n_ethertype_arp
 end
 
@@ -147,5 +147,5 @@ function selftest()
    assert(is_arp(rep))
    assert(is_arp_reply(rep))
    local isat = get_isat_ethernet(rep, tlocal_ip)
-   assert(C.memcmp(isat, tlocal_eth, 6) == 0)
+   assert(C.memcmp(isat, tremote_eth, 6) == 0)
 end
