@@ -4,7 +4,9 @@ module(..., package.seeall)
 -- Given a remote IPv6 address, try to find out its MAC address.
 -- If resolution succeeds:
 -- All packets coming through the 'south' interface (ie, via the network card)
--- are silently forwarded (unless dropped by the network card).
+-- are silently forwarded.
+-- Note that the network card can drop packets; if it does, they will not get
+-- to this app.
 -- All packets coming through the 'north' interface (the lwaftr) will have
 -- their Ethernet headers rewritten.
 
