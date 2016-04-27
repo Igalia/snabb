@@ -35,7 +35,7 @@ end
 -- Create an Intel82599 App for the device with 'pciaddress'.
 function Intel82599:new (arg)
    local conf = config.parse_app_arg(arg)
-
+   local result
    if conf.vmdq then
       if devices[conf.pciaddr] == nil then
          devices[conf.pciaddr] = {pf=intel10g.new_pf(conf):open(), vflist={}}
@@ -44,12 +44,13 @@ function Intel82599:new (arg)
       local poolnum = firsthole(dev.vflist)-1
       local vf = dev.pf:new_vf(poolnum)
       dev.vflist[poolnum+1] = vf
-      return setmetatable({dev=vf:open(conf)}, Intel82599)
+      result = setmetatable({dev=vf:open(conf)}, Intel82599)
    else
       local dev = intel10g.new_sf(conf):open()
       if not dev then return null end
-      return setmetatable({dev=dev, zone="intel"}, Intel82599)
+      result = setmetatable({dev=dev, zone="intel"}, Intel82599)
    end
+   return result
 end
 
 function Intel82599:stop()
@@ -95,6 +96,10 @@ function Intel82599:pull ()
       transmit(l, self.dev:receive())
    end
    self:add_receive_buffers()
+end
+
+function Intel82599:ingress_packet_drops ()
+   return self.dev:ingress_packet_drops()
 end
 
 function Intel82599:add_receive_buffers ()

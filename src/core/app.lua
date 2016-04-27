@@ -20,6 +20,11 @@ local use_restart = false
 
 test_skipped_code = 43
 
+ingress_packet_drops = {
+   threshold = 100000,
+   wait = 20,
+}
+
 -- The set of all active apps and links in the system.
 -- Indexed both by name (in a table) and by number (in an array).
 app_table,  app_array  = {}, {}
@@ -283,6 +288,22 @@ function pace_breathing ()
    end
 end
 
+local function exceeded_ingress_packet_drops (app)
+   if app.ingress_packet_drops then
+      return app:ingress_packet_drops() > ingress_packet_drops.threshold
+   end
+end
+
+local jit_flush = (function ()
+   local last_trigger = 0
+   return function (app)
+      local now = now()
+      if now < last_trigger then return end
+      jit.flush()
+      last_trigger = now + ingress_packet_drops.wait
+   end
+end)()
+
 function breathe ()
    monotonic_now = C.get_monotonic_time()
    -- Restart: restart dead apps
@@ -290,11 +311,12 @@ function breathe ()
    -- Inhale: pull work into the app network
    for i = 1, #app_array do
       local app = app_array[i]
---      if app.pull then
---         zone(app.zone) app:pull() zone()
       if app.pull and not app.dead then
          zone(app.zone)
          with_restart(app, app.pull)
+         if exceeded_ingress_packet_drops(app) then
+            jit_flush()
+         end
          zone()
       end
    end
