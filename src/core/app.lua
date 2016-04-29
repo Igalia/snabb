@@ -289,25 +289,21 @@ function pace_breathing ()
    end
 end
 
-local function exceeded_ingress_packet_drops (app)
-   if app.ingress_packet_drops then
-      local threshold = ingress_packet_drops.last_value + ingress_packet_drops.threshold
-      local current = app:ingress_packet_drops()
-      local exceeded = current > threshold
-      if exceeded then
-         ingress_packet_drops.last_value = current
-      end
-      return exceeded
-   end
-end
-
-local jit_flush = (function ()
+local jit_flush_if_needed = (function ()
    local last_trigger = 0
    return function (app)
       local now = now()
       if now < last_trigger then return end
-      jit.flush()
-      last_trigger = now + ingress_packet_drops.wait
+      if app.ingress_packet_drops then
+         local threshold = ingress_packet_drops.last_value + ingress_packet_drops.threshold
+         local current = app:ingress_packet_drops()
+         local exceeded = current > threshold
+         if exceeded then
+            ingress_packet_drops.last_value = current
+            last_trigger = now + ingress_packet_drops.wait
+            jit.flush()
+         end
+      end
    end
 end)()
 
@@ -321,9 +317,7 @@ function breathe ()
       if app.pull and not app.dead then
          zone(app.zone)
          with_restart(app, app.pull)
-         if exceeded_ingress_packet_drops(app) then
-            jit_flush()
-         end
+         jit_flush_if_needed(app)
          zone()
       end
    end
