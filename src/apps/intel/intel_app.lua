@@ -9,6 +9,7 @@ local lib      = require("core.lib")
 local pci      = require("lib.hardware.pci")
 local register = require("lib.hardware.register")
 local intel10g = require("apps.intel.intel10g")
+local counter  = require("core.counter")
 local receive, transmit, full, empty = link.receive, link.transmit, link.full, link.empty
 Intel82599 = {}
 Intel82599.__index = Intel82599
@@ -53,6 +54,12 @@ function Intel82599:new (arg)
    return result
 end
 
+function Intel82599:start ()
+   self.shmname = ("app/%s/"):format(self.appname)
+   self.counters = {}
+   self.counters["ingress_packet_drops"] = counter.open(self.shmname.."ingress_packet_drops")
+end
+
 function Intel82599:stop()
    local close_pf = nil
    if self.dev.pf and devices[self.dev.pf.pciaddress] then
@@ -70,6 +77,10 @@ function Intel82599:stop()
    self.dev:close()
    if close_pf then
       close_pf:close()
+   end
+   -- Remove app counters.
+   for name,_ in pairs(self.counters) do
+      counter.delete(self.shmname..name)
    end
 end
 
@@ -99,7 +110,9 @@ function Intel82599:pull ()
 end
 
 function Intel82599:ingress_packet_drops ()
-   return self.dev:ingress_packet_drops()
+   local result = tonumber(self.dev:ingress_packet_drops())
+   counter.set(self.counters["ingress_packet_drops"], result)
+   return result
 end
 
 function Intel82599:add_receive_buffers ()
