@@ -20,18 +20,41 @@ local use_restart = false
 
 test_skipped_code = 43
 
-ingress_packet_drops = {
-   threshold = 100000,
-   wait = 20,
-   last_value = 0,
-}
-
 -- The set of all active apps and links in the system.
 -- Indexed both by name (in a table) and by number (in an array).
 app_table,  app_array  = {}, {}
 link_table, link_array = {}, {}
 
 configuration = config.new()
+
+-- Ingress packet drop monitor.
+ingress_drop_monitor = {
+   threshold = 100000,
+   wait = 20,
+   last_flush = 0,
+   last_value = ffi.new('uint64_t[1]'),
+   current_value = ffi.new('uint64_t[1]')
+}
+
+function ingress_drop_monitor:sample()
+   local sum = self.current_value
+   sum[0] = 0
+   for i = 1, #app_array do
+      local app = app_array[i]
+      if app.pull and not app.dead then
+         sum[0] = sum[0] + app:ingress_packet_drops()
+      end
+   end
+end
+
+function ingress_drop_monitor:jit_flush_if_needed()
+   if self.current_value[0] - self.last_value[0] < self.threshold then return end
+   if app.now() - self.last_flush < self.wait then return end
+   self.last_flush = app.now()
+   self.last_value[0] = self.current_value[0]
+   jit.flush()
+   --- TODO: Change last_flush, last_value and current_value fields to be counters.
+end
 
 -- Counters for statistics.
 breaths   = counter.open("engine/breaths")   -- Total breaths taken
@@ -252,6 +275,16 @@ function main (options)
       breathe = latency:wrap_thunk(breathe, now)
    end
 
+   if options.ingress_drop_monitor then
+      local interval = 1e9 / 1e2   -- Every 100 milliseconds.
+      local function fn()
+         ingress_drop_monitor:sample()
+         ingress_drop_monitor:jit_flush_if_needed()
+      end
+      local t = timer.new("ingress drop monitor", fn, interval, "repeating")
+      timer.activate(t)
+   end
+
    monotonic_now = C.get_monotonic_time()
    repeat
       breathe()
@@ -289,24 +322,6 @@ function pace_breathing ()
    end
 end
 
-local jit_flush_if_needed = (function ()
-   local last_trigger = 0
-   return function (app)
-      local now = now()
-      if now < last_trigger then return end
-      if app.ingress_packet_drops then
-         local threshold = ingress_packet_drops.last_value + ingress_packet_drops.threshold
-         local current = app:ingress_packet_drops()
-         local exceeded = current > threshold
-         if exceeded then
-            ingress_packet_drops.last_value = current
-            last_trigger = now + ingress_packet_drops.wait
-            jit.flush()
-         end
-      end
-   end
-end)()
-
 function breathe ()
    monotonic_now = C.get_monotonic_time()
    -- Restart: restart dead apps
@@ -317,7 +332,6 @@ function breathe ()
       if app.pull and not app.dead then
          zone(app.zone)
          with_restart(app, app.pull)
-         jit_flush_if_needed(app)
          zone()
       end
    end
