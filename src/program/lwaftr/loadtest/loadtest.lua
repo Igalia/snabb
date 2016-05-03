@@ -6,7 +6,6 @@ local config = require("core.config")
 local pci = require("lib.hardware.pci")
 local Intel82599 = require("apps.intel.intel_app").Intel82599
 local basic_apps = require("apps.basic.basic_apps")
-local rate_limiter = require("apps.rate_limiter.rate_limiter")
 local main = require("core.main")
 local PcapReader = require("apps.pcap.pcap").PcapReader
 local lib = require("core.lib")
@@ -101,20 +100,17 @@ function run(args)
    for _,stream in ipairs(streams) do
       stream.pcap_id = 'pcap_'..stream.tx_id
       stream.repeater_id = 'repeater_'..stream.tx_id
-      stream.rate_limiter_id = 'rate_limiter_'..stream.tx_id
       stream.nic_tx_id = 'nic_'..stream.tx_id
       stream.nic_rx_id = 'nic_'..stream.rx_id
       stream.rx_sink_id = 'rx_sink_'..stream.rx_id
 
       config.app(c, stream.pcap_id, PcapReader, stream.capture_file)
-      config.app(c, stream.repeater_id, basic_apps.Repeater, {})
-      config.app(c, stream.rate_limiter_id, rate_limiter.RateLimiter, { })
+      config.app(c, stream.repeater_id, basic_apps.RateLimitedRepeater, {})
       config.app(c, stream.nic_tx_id, Intel82599, { pciaddr = stream.pci_addr })
       config.app(c, stream.rx_sink_id, basic_apps.Sink)
 
       config.link(c, stream.pcap_id..".output -> "..stream.repeater_id..".input")
-      config.link(c, stream.repeater_id..".output -> "..stream.rate_limiter_id..".input")
-      config.link(c, stream.rate_limiter_id..".output -> "..stream.nic_tx_id..".rx")
+      config.link(c, stream.repeater_id..".output -> "..stream.nic_tx_id..".rx")
 
       config.link(c, stream.nic_rx_id..".tx -> "..stream.rx_sink_id..".input")
    end
@@ -123,7 +119,7 @@ function run(args)
    local function adjust_rates(bit_rate)
       local byte_rate = bit_rate / 8
       for _,stream in ipairs(streams) do
-         local app = engine.app_table[stream.rate_limiter_id]
+         local app = engine.app_table[stream.repeater_id]
          app:set_rate(byte_rate)
       end
    end
