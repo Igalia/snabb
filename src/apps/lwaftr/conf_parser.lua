@@ -231,6 +231,23 @@ function Parser:parse_string()
    return str
 end
 
+function Parser:parse_string_or_file()
+   local str = self:parse_string()
+   if not str:match('^<') then
+      return str
+   end
+   -- Relative pathname, remove the angle bracket.
+   path = str:sub(2)
+   if self.name then
+      path = lib.dirname(self.name)..path
+   end
+   local filter, err = lib.readfile(path, "*a")
+   if filter == nil then
+      self:error('cannot read filter conf file "%s": %s', path, err)
+   end
+   return filter
+end
+
 function Parser:parse_file_name()
    local str = self:parse_string()
    if str == '' then self:error('file name is empty') end
