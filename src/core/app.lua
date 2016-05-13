@@ -28,6 +28,36 @@ link_table, link_array = {}, {}
 
 configuration = config.new()
 
+-- Ingress packet drop monitor.
+ingress_drop_monitor = {
+   threshold = 100000,
+   wait = 20,
+   last_flush = 0,
+   last_value = ffi.new('uint64_t[1]'),
+   current_value = ffi.new('uint64_t[1]')
+}
+
+function ingress_drop_monitor:sample()
+   local sum = self.current_value
+   sum[0] = 0
+   for i = 1, #app_array do
+      local app = app_array[i]
+      if app.ingress_packet_drops and not app.dead then
+         sum[0] = sum[0] + app:ingress_packet_drops()
+      end
+   end
+end
+
+function ingress_drop_monitor:jit_flush_if_needed()
+   if self.current_value[0] - self.last_value[0] < self.threshold then return end
+   if app.now() - self.last_flush < self.wait then return end
+   self.last_flush = app.now()
+   self.last_value[0] = self.current_value[0]
+   jit.flush()
+   print("jit.flush")
+   --- TODO: Change last_flush, last_value and current_value fields to be counters.
+end
+
 -- Counters for statistics.
 breaths   = counter.open("engine/breaths")   -- Total breaths taken
 frees     = counter.open("engine/frees")     -- Total packets freed
@@ -335,8 +365,6 @@ function breathe ()
    -- Inhale: pull work into the app network
    for i = 1, #app_array do
       local app = app_array[i]
---      if app.pull then
---         zone(app.zone) app:pull() zone()
       if app.pull and not app.dead then
          zone(app.zone)
          with_restart(app, app.pull)
