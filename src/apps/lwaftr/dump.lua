@@ -129,9 +129,9 @@ the binding table to /tmp.
 --]]
 function dump_binding_table (lwstate)
    local bt_txt = lwstate.conf.binding_table
-   local bt_o = bt_txt:gsub("%.txt$", "%.o")
+   local bt_o = bt_txt:gsub("%.txt$", "")..'.o'
    if not bt_is_fresh(bt_txt, bt_o) then
-      error("Binding table file is outdated: '%s'"):format(bt_txt)
+      error(("Binding table file is outdated: '%s'"):format(bt_txt))
       main.exit(1)
    end
    local dest = (BINDING_TABLE_FILE_DUMP):format(os.time())
