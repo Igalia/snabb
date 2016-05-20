@@ -245,8 +245,8 @@ function Parser:parse_file_name()
    return self:make_path(self:parse_string())
 end
 
-function Parser:parse_string_or_file()
-   local str = self:parse_string()
+function Parser:parse_text_or_file()
+   local str = self:parse_text()
    if not str:match('^<') then
       return str
    end
@@ -257,6 +257,14 @@ function Parser:parse_string_or_file()
       self:error('cannot read filter conf file "%s": %s', path, err)
    end
    return filter
+end
+
+function Parser:parse_text()
+   local str
+   if self:check("'") then str = self:parse_quoted_string("'")
+   elseif self:check('"') then str = self:parse_quoted_string('"')
+   else str = self:take_while('[^\n,]') end
+   return str
 end
 
 function Parser:parse_boolean()
