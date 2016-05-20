@@ -58,10 +58,10 @@ local lwaftr_conf_spec = {
       v4_vlan_tag=Parser.parse_vlan_tag,
       v6_vlan_tag=Parser.parse_vlan_tag,
       vlan_tagging=Parser.parse_boolean,
-      ipv4_ingress_filter=Parser.parse_string_or_file,
-      ipv4_egress_filter=Parser.parse_string_or_file,
-      ipv6_ingress_filter=Parser.parse_string_or_file,
-      ipv6_egress_filter=Parser.parse_string_or_file,
+      ipv4_ingress_filter=Parser.parse_text_or_file,
+      ipv4_egress_filter=Parser.parse_text_or_file,
+      ipv6_ingress_filter=Parser.parse_text_or_file,
+      ipv6_egress_filter=Parser.parse_text_or_file,
    },
    defaults={
       aftr_ipv4_ip=required('aftr_ipv4_ip'),
@@ -135,6 +135,7 @@ function selftest()
             v4_vlan_tag = 1092 # 0x444
             v6_vlan_tag = 1638 # 0x666
             vlan_tagging = true
+            ipv4_ingress_filter = not dst host 8.8.8.8
         ]],
       {
          aftr_ipv4_ip = ipv4:pton('1.2.3.4'),
@@ -155,7 +156,8 @@ function selftest()
          policy_icmpv6_outgoing = policies['ALLOW'],
          v4_vlan_tag = 0x444,
          v6_vlan_tag = 0x666,
-         vlan_tagging = true
+         vlan_tagging = true,
+         ipv4_ingress_filter = "not dst host 8.8.8.8",
       }
    )
    local function test_loading_filter_conf_from_file()
