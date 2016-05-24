@@ -9,11 +9,14 @@ local ethernet = require("lib.protocol.ethernet")
 local ipv4 = require("lib.protocol.ipv4")
 local checksum = require("lib.checksum")
 local packet = require("core.packet")
+local time_now = require("core.app").now
 local bit = require("bit")
 local ffi = require("ffi")
 
 local receive, transmit = link.receive, link.transmit
 local rd16, wr16, rd32, wr32 = lwutil.rd16, lwutil.wr16, lwutil.rd32, lwutil.wr32
+local list_append, list_remove = lwutil.linked_list_append, lwutil.linked_list_remove
+local list_first, list_is_empty = lwutil.linked_list_first, lwutil.linked_list_is_empty
 local get_ihl_from_offset, htons = lwutil.get_ihl_from_offset, lwutil.htons
 local is_fragment = fragmentv4.is_fragment
 
@@ -36,8 +39,6 @@ ICMPEcho = {}
 
 function Reassembler:new(conf)
    local o = setmetatable({}, {__index=Reassembler})
-   o.conf = conf
-
    if conf.vlan_tagging then
       o.l2_size = ethernet_header_size + 4
       o.ethertype_offset = constants.o_ethernet_ethertype + 4
@@ -46,6 +47,12 @@ function Reassembler:new(conf)
       o.ethertype_offset = constants.o_ethernet_ethertype
    end
    o.fragment_cache = {}
+   o.fragment_list = nil
+   o.fragment_count = 0
+   o.fragment_cache_max = conf.fragment_cache_max
+   if o.fragment_cache_max < 2 then
+      o.fragment_cache_max = 2
+   end
    return o
 end
 
@@ -56,19 +63,56 @@ function Reassembler:key_frag(frag)
    return frag_id .. "|" .. src_ip .. dst_ip
 end
 
-function Reassembler:cache_fragment(frag)
+function Reassembler:cache_fragment(frag, current_time)
+   if self.fragment_count >= self.fragment_cache_max then
+      self:trim(50)  -- TODO?: Allow configuring this value.
+   end
+
    local cache = self.fragment_cache
    local key = self:key_frag(frag)
-   cache[key] = cache[key] or {}
-   table.insert(cache[key], frag)
-   return cache[key]
+   local frags = cache[key]
+   if frags then
+      -- There was a fragment list with this key already: remove
+      -- it from the linked list before it gets appended below.
+      self.fragment_list = list_remove(self.fragment_list, frags)
+   else
+      -- The first fragment is going to be added.
+      frags = {}
+      cache[key] = frags
+   end
+   frags.time = current_time
+   self.fragment_list = list_append(self.fragment_list, frags)
+   self.fragment_count = self.fragment_count + 1
+
+   table.insert(frags, frag)
+   return frags
 end
 
 function Reassembler:clean_fragment_cache(frags)
    local key = self:key_frag(frags[1])
+   self.fragment_list = list_remove(self.fragment_list, frags)
    self.fragment_cache[key] = nil
+   self.fragment_count = self.fragment_count - #frags
    for _, p in ipairs(frags) do
       packet.free(p)
+   end
+end
+
+function Reassembler:trim(iterations, current_time)
+   if iterations < 1 then
+      iterations = 1
+   end
+
+   while iterations > 0 and not list_is_empty(self.fragment_list) do
+      iterations = iterations - 1
+      local frags = list_first(self.fragment_list)
+      if current_time then
+         -- TODO?: Make timeout configurable.
+         if current_time - frags.time < 60 then
+            break
+         end
+      end
+      self:clean_fragment_cache(frags)
    end
 end
 
@@ -83,10 +127,13 @@ function Reassembler:push ()
    local l2_size = self.l2_size
    local ethertype_offset = self.ethertype_offset
 
+   local now = time_now()
+   self:trim(20, now)  -- TODO?: Allow configuring this value.
+
    for _=1,math.min(link.nreadable(input), link.nwritable(output)) do
       local pkt = receive(input)
       if is_ipv4(pkt, ethertype_offset) and is_fragment(pkt, l2_size) then
-         local frags = self:cache_fragment(pkt)
+         local frags = self:cache_fragment(pkt, now)
          local status, maybe_pkt = fragmentv4.reassemble(frags, l2_size)
          if status == fragmentv4.REASSEMBLE_OK then
             -- Reassembly was successful

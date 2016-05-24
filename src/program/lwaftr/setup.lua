@@ -19,8 +19,10 @@ function lwaftr_app(c, conf)
    local function append(t, elem) table.insert(t, elem) end
    local function prepend(t, elem) table.insert(t, 1, elem) end
 
-   config.app(c, "reassemblerv4", ipv4_apps.Reassembler, {})
-   config.app(c, "reassemblerv6", ipv6_apps.Reassembler, {})
+   config.app(c, "reassemblerv4", ipv4_apps.Reassembler,
+              { fragment_cache_max = conf.ipv4_fragment_cache_max })
+   config.app(c, "reassemblerv6", ipv6_apps.Reassembler,
+              { fragment_cache_max = conf.ipv6_fragment_cache_max })
    config.app(c, "icmpechov4", ipv4_apps.ICMPEcho, { address = conf.aftr_ipv4_ip })
    config.app(c, 'lwaftr', lwaftr.LwAftr, conf)
    config.app(c, "icmpechov6", ipv6_apps.ICMPEcho, { address = conf.aftr_ipv6_ip })
