@@ -22,10 +22,10 @@ policy_icmpv6_outgoing = ALLOW
 v4_vlan_tag = 1234
 v6_vlan_tag = 42
 vlan_tagging = true
-# ipv4_ingress_filter = ip
-# ipv4_egress_filter = ip
-# ipv6_ingress_filter = ip6
-# ipv6_egress_filter = ip6
+ipv4_ingress_filter = "ip src 192.168.0.1"
+ipv4_egress_filter = "ip dst 8.8.8.8"
+ipv6_ingress_filter = "ip6 src fe80::1"
+ipv6_egress_filter = "ip dst 2001:4860:4860::8888"
 ```
 
 The lwAFTR is associated with two physical network cards. One of these cards
@@ -150,10 +150,10 @@ will be provided upon request.
 ### Ingress and egress filters
 
 ```
-# ipv4_ingress_filter = ip
-# ipv4_egress_filter = ip
-# ipv6_ingress_filter = ip6
-# ipv6_egress_filter = ip6
+ipv4_ingress_filter = "ip src 192.168.0.1"
+ipv4_egress_filter = "ip dst 8.8.8.8"
+ipv6_ingress_filter = "ip6 src fe80::1"
+ipv6_egress_filter = "ip dst 2001:4860:4860::8888"
 ```
 
 In the example configuration these entries are commented out by the `#`
