@@ -24,26 +24,21 @@ local function file_exists(path)
    return stat and stat.isreg
 end
 
-local function dir_exists(path)
-   local stat = S.stat(path)
-   return stat and stat.isdir
-end
-
-local function nic_exists(pci_addr)
-   local devices="/sys/bus/pci/devices"
-   return dir_exists(("%s/%s"):format(devices, pci_addr)) or
-      dir_exists(("%s/0000:%s"):format(devices, pci_addr))
-end
-
 function parse_args(args)
    if #args == 0 then show_usage(1) end
    local conf_file, v4, v6
-   local ring_buffer_size
+   local ring_buffer_size, virtio_net
    local opts = { verbosity = 0 }
    local handlers = {}
    local cpu
    function handlers.v () opts.verbosity = opts.verbosity + 1 end
-   function handlers.i () opts.virtio_net = true end
+
+   function handlers.i ()
+      io.stderr:write("Parameter '--virtio' is deprecated: ",
+         "use '--v4 virtio:<pci-addr>' and '--v6 virtio:<pci-addr>' instead.\n")
+      virtio_net = true
+   end
+
    function handlers.D (arg)
       opts.duration = assert(tonumber(arg), "duration must be a number")
    end
@@ -67,27 +62,17 @@ function parse_args(args)
          fatal('Failed to enable real-time scheduling.  Try running as root.')
       end
    end
-   function handlers.v4(arg)
+   function handlers.v4 (arg)
+      if not arg then fatal("Argument '--v4' was not set") end
       v4 = arg
-      if not arg then
-         fatal("Argument '--v4' was not set")
-      end
-      if not nic_exists(v4) then
-         fatal(("Couldn't locate NIC with PCI address '%s'"):format(v4))
-      end
    end
    handlers["v4-pci"] = function(arg)
       print("WARNING: Deprecated argument '--v4-pci'. Use '--v4' instead.")
       handlers.v4(arg)
    end
-   function handlers.v6(arg)
+   function handlers.v6 (arg)
+      if not arg then fatal("Argument '--v6' was not set") end
       v6 = arg
-      if not v6 then
-         fatal("Argument '--v6' was not set")
-      end
-      if not nic_exists(v6) then
-         fatal(("Couldn't locate NIC with PCI address '%s'"):format(v6))
-      end
    end
    handlers["v6-pci"] = function(arg)
       print("WARNING: Deprecated argument '--v6-pci'. Use '--v6' instead.")
@@ -113,9 +98,10 @@ function parse_args(args)
         virtio = "i", ["ring-buffer-size"] = "r", cpu = 1,
         ["real-time"] = 0, ["no-ingress-drop-monitor"] = 0, })
    if ring_buffer_size ~= nil then
-      if opts.virtio_net then
+      if virtio_net then
          fatal("setting --ring-buffer-size does not work with --virtio")
       end
+      -- TODO: Only do this when one of the chosen devices is intel10g
       require('apps.intel.intel10g').num_descriptors = ring_buffer_size
    end
    if not conf_file then fatal("Missing required --conf argument.") end
@@ -123,6 +109,9 @@ function parse_args(args)
    if not v6 then fatal("Missing required --v6 argument.") end
    if cpu then numa.bind_to_cpu(cpu) end
    numa.check_affinity_for_pci_addresses({ v4, v6 })
+   if virtio_net then
+      v4, v6 = "virtio:" .. v4, "virtio:" .. v6
+   end
    return opts, conf_file, v4, v6
 end
 
@@ -130,11 +119,9 @@ function run(args)
    local opts, conf_file, v4, v6 = parse_args(args)
    local conf = require('apps.lwaftr.conf').load_lwaftr_config(conf_file)
 
-   local c = config.new()
-   if opts.virtio_net then
-      setup.load_virt(c, conf, 'inetNic', v4, 'b4sideNic', v6)
-   else
-      setup.load_phy(c, conf, 'inetNic', v4, 'b4sideNic', v6)
+   local c, err = setup.load_gen(conf, "inetNic", v4, "b4sideNic", v6)
+   if not c then
+      fatal(err)
    end
    engine.configure(c)
 

@@ -1,15 +1,41 @@
 Usage: run --help
-       run --conf <conf-file> --v4 <pci-addr> --v4 <pci-addr> [OPTION...]
+       run --conf <conf-file> --v4 [<kind>:]<config> --v6 [<kind>:]<config> [OPTION...]
 
 Required arguments:
-       --conf   <conf-file>     Sets configuration policy table
-       --v4 <pci-addr>          PCI device number for the INET-side NIC
-       --v6 <pci-addr>          PCI device number for the B4-side NIC
+       --conf <conf-file>         Sets configuration policy table.
+       --v4 [<kind>:]<config>     Device kind and configuration parameters
+                                  for the Internet-side interface.
+       --v6 [<kind>:]<config>     Device kind and configuration parameters
+                                  for the B4-side interface.
 
 Optional arguments:
-       --virtio                 Use virtio-net interfaces instead of Intel 82599
-       --ring-buffer-size <size>  Set Intel 82599 receive buffer size
-       --cpu    <cpu>           Bind the lwAFTR to the given CPU
-       --real-time              Enable real-time SCHED_FIFO scheduler
-       -D       <seconds>       Duration in seconds
-       -v                       Verbose (repeat for more verbosity)
+       --ring-buffer-size <size>  Set the Intel 82599 receive buffer size.
+       --cpu <cpu>                Bind the lwAFTR to the given CPU.
+       --real-time                Enable real-time SCHED_FIFO scheduler.
+       -D <seconds>               Duration in seconds.
+       -v                         Verbose (repeat for more verbosity).
+
+Deprecated arguments:
+       --v4-pci <pci-addr>        PCI device number for the INET-side NIC.
+       --v6-pci <pci-addr>        PCI device number for the B4-side NIC.
+       --virtio                   Use virtio-net interfaces instead of Intel 82599.
+
+Device kinds and configuration parameters:
+
+       intel82259:<pci-addr>
+             Intel 82259-based PCI NIC. The parameter is the PCI address of
+             the NIC. (Alias: intel10g:<pci-addr>).
+
+       virtio:<pci-addr>
+             virtio-net PCI NIC. The parameter is the PCI address of the NIC.
+             This can be used to bypass the kernel in an emulated environment.
+             (Alias: vpci:<pci-addr>).
+
+       tap:<interface>
+             Use a TAP interface. The parameter is the name of an interface,
+             which must be created beforehand using "ip tuntap".
+
+       raw:<interface>
+             Attach to an existing kernel-managed network interface using
+             a raw packet(7) socket. The parameter is the name of a network
+             interface (e.g. "eth0").
