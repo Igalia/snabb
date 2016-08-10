@@ -24,23 +24,55 @@ function scmp {
     fi
 }
 
+function snabb_run_and_cmp_two_interfaces {
+   conf=$1; v4_in=$2; v6_in=$3; v4_out=$4; v6_out=$5; counters_path=$6;
+   endoutv4="${TEST_OUT}/endoutv4.pcap"; endoutv6="${TEST_OUT}/endoutv6.pcap";
+   rm -f $endoutv4 $endoutv6
+   ${SNABB_LWAFTR} check \
+      $conf $v4_in $v6_in \
+      $endoutv4 $endoutv6 $counters_path || quit_with_msg \
+         "Failure: ${SNABB_LWAFTR} check $*"
+   scmp $v4_out $endoutv4 \
+      "Failure: ${SNABB_LWAFTR} check $*"
+   scmp $v6_out $endoutv6 \
+      "Failure: ${SNABB_LWAFTR} check $*"
+   echo "Test passed"
+}
+
+function is_packet_in_wrong_interface_test {
+    counters_path=$1
+    if [[ "$counters_path" == "${COUNTERS}/non-ipv6-traffic-to-ipv6-interface.lua" ||
+          "$counters_path" == "${COUNTERS}/non-ipv4-traffic-to-ipv4-interface.lua" ]]; then
+        echo 1
+    fi
+}
+
+function snabb_run_and_cmp_on_a_stick {
+   conf=$1; v4_in=$2; v6_in=$3; v4_out=$4; v6_out=$5; counters_path=$6
+   endoutv4="${TEST_OUT}/endoutv4.pcap"; endoutv6="${TEST_OUT}/endoutv6.pcap"
+   if [[ $(is_packet_in_wrong_interface_test $counters_path) ]]; then
+       echo "Test skipped"
+       return
+   fi
+   rm -f $endoutv4 $endoutv6
+   ${SNABB_LWAFTR} check --on-a-stick \
+      $conf $v4_in $v6_in \
+      $endoutv4 $endoutv6 $counters_path || quit_with_msg \
+         "Failure: ${SNABB_LWAFTR} check $*"
+   scmp $v4_out $endoutv4 \
+      "Failure: ${SNABB_LWAFTR} check $*"
+   scmp $v6_out $endoutv6 \
+      "Failure: ${SNABB_LWAFTR} check $*"
+   echo "Test passed"
+}
+
 function snabb_run_and_cmp {
-   rm -f ${TEST_OUT}/endoutv4.pcap ${TEST_OUT}/endoutv6.pcap
    if [ -z $6 ]; then
       echo "not enough arguments to snabb_run_and_cmp"
       exit 1
    fi
-   ${SNABB_LWAFTR} check \
-      $1 $2 $3 \
-      ${TEST_OUT}/endoutv4.pcap ${TEST_OUT}/endoutv6.pcap $6 || quit_with_msg \
-         "Failure: ${SNABB_LWAFTR} check \
-         $1 $2 $3 \
-         ${TEST_OUT}/endoutv4.pcap ${TEST_OUT}/endoutv6.pcap $6"
-   scmp $4 ${TEST_OUT}/endoutv4.pcap \
-      "Failure: ${SNABB_LWAFTR} check $1 $2 $3 $4 $5 $6"
-   scmp $5 ${TEST_OUT}/endoutv6.pcap \
-      "Failure: ${SNABB_LWAFTR} check $1 $2 $3 $4 $5 $6"
-   echo "Test passed"
+   snabb_run_and_cmp_on_a_stick $@
+   snabb_run_and_cmp_two_interfaces $@
 }
 
 echo "Testing: from-internet IPv4 packet found in the binding table."
@@ -182,9 +214,9 @@ snabb_run_and_cmp ${TEST_CONF}/icmp_on_fail_vlan.conf \
 
 echo "Testing: from-to-b4 IPv6 packet NOT found in the binding table, no ICMP."
 snabb_run_and_cmp ${TEST_CONF}/no_icmp_vlan.conf \
-   ${TEST_DATA}/tcp-afteraftr-ipv6.pcap ${EMPTY} \
+   ${EMPTY} ${TEST_DATA}/tcp-afteraftr-ipv6.pcap \
    ${EMPTY} ${EMPTY} \
-   ${COUNTERS}/empty.lua
+   ${COUNTERS}/drop-no-source-softwire-ipv6.lua
 
 echo "Testing: from-b4 to-internet IPv6 packet found in the binding table."
 snabb_run_and_cmp ${TEST_CONF}/no_icmp_vlan.conf \
@@ -288,6 +320,18 @@ snabb_run_and_cmp ${TEST_CONF}/no_icmp_vlan.conf \
    ${EMPTY} ${TEST_DATA}/tcp-fromb4-customBRIP1-tob4-customBRIP2-ipv6.pcap \
    ${EMPTY} ${TEST_DATA}/recap-customBR-IPs-ipv6.pcap \
    ${COUNTERS}/from-to-b4-ipv6-hairpin.lua
+
+echo "Testing sending non-IPv6 traffic to the IPv6 interface."
+snabb_run_and_cmp ${TEST_CONF}/no_icmp_vlan.conf \
+   ${TEST_DATA}/tcp-afteraftr-ipv6.pcap ${EMPTY} \
+   ${EMPTY} ${EMPTY} \
+   ${COUNTERS}/empty.lua
+
+echo "Testing: sending non-IPv4 traffic to the IPv4 interface"
+snabb_run_and_cmp ${TEST_CONF}/no_icmp_vlan.conf \
+   ${EMPTY} ${TEST_DATA}/tcp-frominet-bound.pcap \
+   ${EMPTY} ${EMPTY} \
+   ${COUNTERS}/empty.lua
 
 # Test UDP packets
 
