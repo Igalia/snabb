@@ -147,9 +147,19 @@ function load_on_a_stick(c, conf, v4v6, args)
    local Tap = require("apps.tap.tap").Tap
    lwaftr_app(c, conf)
 
-   config.app(c, 'nic', Intel82599, {
-      pciaddr = args.pciaddr,
-   })
+   if conf.vlan_tagging then
+      config.app(c, 'nic', Intel82599, {
+         pciaddr = args.pciaddr,
+         vmdq=true,
+         vlan={conf.v4_vlan_tag, conf.v6_vlan_tag},
+         macaddr=ethernet:ntop(conf.aftr_mac_inet_side),
+      })
+   else
+      config.app(c, 'nic', Intel82599, {
+         pciaddr = args.pciaddr,
+      })
+   end
+
    if args.mirror then
       local ifname = args.mirror
       config.app(c, 'tap', Tap, ifname)
