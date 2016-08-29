@@ -899,10 +899,13 @@ end
 
 function M_vf:set_VLAN (vlan)
    if not vlan then return self end
-   assert(vlan>=0 and vlan<4096, "bad VLAN number")
+   if tonumber(vlan) then vlan = { vlan } end
+   for _, each in ipairs(vlan) do
+      assert(each>=0 and each<4096, "bad VLAN number")
+      self:add_receive_VLAN(each)
+          :set_tag_VLAN(each)
+   end
    return self
-      :add_receive_VLAN(vlan)
-      :set_tag_VLAN(vlan)
 end
 
 function M_vf:add_receive_VLAN (vlan)
