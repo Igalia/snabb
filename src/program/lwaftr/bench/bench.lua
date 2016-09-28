@@ -19,7 +19,8 @@ function parse_args(args)
       assert(opts.duration >= 0, "duration can't be negative")
    end
    function handlers.h() show_usage(0) end
-   args = lib.dogetopt(args, handlers, "hD:", { help="h", duration="D" })
+   function handlers.y() opts.hydra = true end
+   args = lib.dogetopt(args, handlers, "hyD:", { help="h", hydra="y", duration="D" })
    if #args ~= 3 then show_usage(1) end
    return opts, unpack(args)
 end
@@ -32,9 +33,11 @@ function run(args)
    setup.load_bench(c, conf, inv4_pcap, inv6_pcap, 'sinkv4', 'sinkv6')
    app.configure(c)
 
-   local csv = csv_stats.CSVStatsTimer.new()
-   csv:add_app('sinkv4', { 'input' }, { input='Decapsulation' })
-   csv:add_app('sinkv6', { 'input' }, { input='Encapsulation' })
+   local csv = csv_stats.CSVStatsTimer:new(nil, opts.hydra)
+   local decap = opts.hydra and 'decap' or 'Decap.'
+   local encap = opts.hydra and 'encap' or 'Encap.'
+   csv:add_app('sinkv4', { 'input' }, { input=decap })
+   csv:add_app('sinkv6', { 'input' }, { input=encap })
    csv:activate()
 
    app.busywait = true
