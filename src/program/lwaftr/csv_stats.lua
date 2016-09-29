@@ -89,9 +89,6 @@ function CSVStatsTimer:tick()
    local dt = elapsed - self.prev_elapsed
    self.prev_elapsed = elapsed
    if not self.hydra_mode then
-      -- Hydra reports seem to prefer integers for the X axis.
---      elapsed = math.ceil(elapsed)
---   else
       self.file:write(('%f'):format(elapsed))
    end
    for _,data in ipairs(self.link_data) do
