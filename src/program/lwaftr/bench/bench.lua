@@ -34,10 +34,8 @@ function run(args)
    app.configure(c)
 
    local csv = csv_stats.CSVStatsTimer:new(nil, opts.hydra)
-   local decap = opts.hydra and 'decap' or 'Decap.'
-   local encap = opts.hydra and 'encap' or 'Encap.'
-   csv:add_app('sinkv4', { 'input' }, { input=decap })
-   csv:add_app('sinkv6', { 'input' }, { input=encap })
+   csv:add_app('sinkv4', { 'input' }, { input=opts.hydra and 'decap' or 'Decap.' })
+   csv:add_app('sinkv6', { 'input' }, { input=opts.hydra and 'encap' or 'Encap.' })
    csv:activate()
 
    app.busywait = true

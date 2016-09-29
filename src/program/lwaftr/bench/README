@@ -12,7 +12,7 @@ Usage: bench CONF IPV4-IN.PCAP IPV6-IN.PCAP
 
                              rather than
 
-                               Time (s),decap MPPS,decap Gbps,encap MPPS,encap Gbps
+                               Time (s),Decap. MPPS,Decap. Gbps,Encap. MPPS,Encap. Gbps
 
 Run the lwAFTR with input from IPV4-IN.PCAP and IPV6-IN.PCAP. The bench
 command is used to get an idea of the raw speed of the lwaftr without

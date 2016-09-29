@@ -88,10 +88,10 @@ function CSVStatsTimer:tick()
    local elapsed = engine.now() - self.start
    local dt = elapsed - self.prev_elapsed
    self.prev_elapsed = elapsed
-   if self.hydra_mode then
+   if not self.hydra_mode then
       -- Hydra reports seem to prefer integers for the X axis.
-      elapsed = math.ceil(elapsed)
-   else
+--      elapsed = math.ceil(elapsed)
+--   else
       self.file:write(('%f'):format(elapsed))
    end
    for _,data in ipairs(self.link_data) do
@@ -103,9 +103,10 @@ function CSVStatsTimer:tick()
       data.prev_txbytes = txbytes
       if self.hydra_mode then
          -- TODO: put the actual branch name in place of "master".
-         self.file:write(('%s_mpps,master,%i,%f,mpps\n'):format(
+         -- Hydra reports seem to prefer integers for the X (time) axis.
+         self.file:write(('%s_mpps,master,%.f,%f,mpps\n'):format(
             data.link_name,elapsed,diff_txpackets))
-         self.file:write(('%s_gbps,master,%i,%f,gbps\n'):format(
+         self.file:write(('%s_gbps,master,%.f,%f,gbps\n'):format(
             data.link_name,elapsed,diff_txbytes))
       else
          self.file:write((',%f'):format(diff_txpackets))
