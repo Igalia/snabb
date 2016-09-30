@@ -39,19 +39,18 @@ function parse_args(args)
    if #args == 0 then show_usage(1) end
    local conf_file, v4, v6
    local ring_buffer_size
-   local opts = { verbosity = 0, ingress_drop_monitor = 'flush' }
+   local opts = {
+      verbosity = 0, ingress_drop_monitor = 'flush', csv_file = 'bench.csv' }
    local handlers = {}
    local cpu
    function handlers.v () opts.verbosity = opts.verbosity + 1 end
    function handlers.i () opts.virtio_net = true end
    function handlers.D (arg)
       opts.duration = assert(tonumber(arg), "duration must be a number")
+      assert(opts.duration >= 0, "duration can't be negative")
    end
    function handlers.c(arg)
       conf_file = arg
-      if not arg then
-         fatal("Argument '--conf' was not set")
-      end
       if not file_exists(conf_file) then
          fatal(("Couldn't locate configuration file at %s"):format(conf_file))
       end
@@ -69,9 +68,6 @@ function parse_args(args)
    end
    function handlers.v4(arg)
       v4 = arg
-      if not arg then
-         fatal("Argument '--v4' was not set")
-      end
       if not nic_exists(v4) then
          fatal(("Couldn't locate NIC with PCI address '%s'"):format(v4))
       end
@@ -82,9 +78,6 @@ function parse_args(args)
    end
    function handlers.v6(arg)
       v6 = arg
-      if not v6 then
-         fatal("Argument '--v6' was not set")
-      end
       if not nic_exists(v6) then
          fatal(("Couldn't locate NIC with PCI address '%s'"):format(v6))
       end
@@ -113,11 +106,14 @@ function parse_args(args)
    handlers["mirror"] = function (ifname)
       opts["mirror"] = ifname
    end
+   handlers["csv-file"] = function (csv_file)
+      opts.csv_file = csv_file
+   end
    function handlers.h() show_usage(0) end
    lib.dogetopt(args, handlers, "b:c:vD:hir:",
       { conf = "c", v4 = 1, v6 = 1, ["v4-pci"] = 1, ["v6-pci"] = 1,
         verbose = "v", duration = "D", help = "h", virtio = "i", cpu = 1,
-        ["ring-buffer-size"] = "r", ["real-time"] = 0,
+        ["ring-buffer-size"] = "r", ["real-time"] = 0, ["csv-file"] = 0,
         ["ingress-drop-monitor"] = 1, ["on-a-stick"] = 1, mirror = 1 })
    if ring_buffer_size ~= nil then
       if opts.virtio_net then
@@ -175,7 +171,7 @@ function run(args)
    end
 
    if opts.verbosity >= 1 then
-      local csv = csv_stats.CSVStatsTimer.new()
+      local csv = csv_stats.CSVStatsTimer.new(opts.csv_file)
       if use_splitter then
          csv:add_app('v4v6', { 'v4', 'v4' }, { tx='IPv4 RX', rx='IPv4 TX' })
          csv:add_app('v4v6', { 'v6', 'v6' }, { tx='IPv6 RX', rx='IPv6 TX' })
