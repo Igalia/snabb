@@ -8,10 +8,11 @@ Usage: transient [OPTIONS] <PCAP-FILE> <NAME> <PCI> [<PCAP-FILE> <NAME> <PCI>]..
                              Linger on each step for DURATION seconds.
   -p period, --period PERIOD
                              Measure each PERIOD seconds.
-  --csv-file FILENAME
-                             The file or path name to which CSV data is written.
-                             A simple filename or relative pathname will be based
-                             on the current directory. Default is "bench.csv".
+  --bench-file FILENAME
+                             The file or path name to which benchmark data is
+                             written. A simple filename or relative pathname
+                             will be based on the current directory. Default
+                             is "bench.csv".
   -h, --help
                              Print usage information.
 

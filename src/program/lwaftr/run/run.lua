@@ -40,7 +40,7 @@ function parse_args(args)
    local conf_file, v4, v6
    local ring_buffer_size
    local opts = {
-      verbosity = 0, ingress_drop_monitor = 'flush', csv_file = 'bench.csv' }
+      verbosity = 0, ingress_drop_monitor = 'flush', bench_file = 'bench.csv' }
    local handlers = {}
    local cpu
    function handlers.v () opts.verbosity = opts.verbosity + 1 end
@@ -106,14 +106,14 @@ function parse_args(args)
    handlers["mirror"] = function (ifname)
       opts["mirror"] = ifname
    end
-   handlers["csv-file"] = function (csv_file)
-      opts.csv_file = csv_file
+   handlers["bench-file"] = function (bench_file)
+      opts.bench_file = bench_file
    end
    function handlers.h() show_usage(0) end
    lib.dogetopt(args, handlers, "b:c:vD:hir:",
       { conf = "c", v4 = 1, v6 = 1, ["v4-pci"] = 1, ["v6-pci"] = 1,
         verbose = "v", duration = "D", help = "h", virtio = "i", cpu = 1,
-        ["ring-buffer-size"] = "r", ["real-time"] = 0, ["csv-file"] = 0,
+        ["ring-buffer-size"] = "r", ["real-time"] = 0, ["bench-file"] = 0,
         ["ingress-drop-monitor"] = 1, ["on-a-stick"] = 1, mirror = 1 })
    if ring_buffer_size ~= nil then
       if opts.virtio_net then

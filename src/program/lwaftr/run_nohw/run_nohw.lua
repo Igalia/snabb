@@ -22,7 +22,7 @@ end
 local function parse_args(args)
    local verbosity = 0
    local conf_file, b4_if, inet_if
-   local csv_file = 'bench.csv'
+   local bench_file = 'bench.csv'
    local handlers = {
       v = function ()
          verbosity = verbosity + 1
@@ -37,8 +37,8 @@ local function parse_args(args)
       I = function (arg)
          inet_if = arg
       end;
-      ["csv-file"] = function (arg)
-         csv_file = arg
+      ["bench-file"] = function (arg)
+         bench_file = arg
       end;
       h = function (arg)
          print(require("program.lwaftr.run_nohw.README_inc"))
@@ -48,17 +48,17 @@ local function parse_args(args)
    lib.dogetopt(args, handlers, "b:c:B:I:vh", {
       help = "h", conf = "c", verbose = "v",
       ["b4-if"] = "B", ["inet-if"] = "I",
-      csv_file = 0,
+      bench_file = 0,
    })
    check(conf_file, "no configuration specified (--conf/-c)")
    check(b4_if, "no B4-side interface specified (--b4-if/-B)")
    check(inet_if, "no Internet-side interface specified (--inet-if/-I)")
-   return verbosity, conf_file, b4_if, inet_if, csv_file
+   return verbosity, conf_file, b4_if, inet_if, bench_file
 end
 
 
 function run(parameters)
-   local verbosity, conf_file, b4_if, inet_if, csv_file = parse_args(parameters)
+   local verbosity, conf_file, b4_if, inet_if, bench_file = parse_args(parameters)
    local c = config.new()
 
    -- AFTR
