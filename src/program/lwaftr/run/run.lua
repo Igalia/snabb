@@ -106,15 +106,16 @@ function parse_args(args)
    handlers["mirror"] = function (ifname)
       opts["mirror"] = ifname
    end
+   function handlers.y() opts.hydra = true end
    handlers["bench-file"] = function (bench_file)
       opts.bench_file = bench_file
    end
    function handlers.h() show_usage(0) end
-   lib.dogetopt(args, handlers, "b:c:vD:hir:",
+   lib.dogetopt(args, handlers, "b:c:vD:yhir:",
       { conf = "c", v4 = 1, v6 = 1, ["v4-pci"] = 1, ["v6-pci"] = 1,
         verbose = "v", duration = "D", help = "h", virtio = "i", cpu = 1,
         ["ring-buffer-size"] = "r", ["real-time"] = 0, ["bench-file"] = 0,
-        ["ingress-drop-monitor"] = 1, ["on-a-stick"] = 1, mirror = 1 })
+        ["ingress-drop-monitor"] = 1, ["on-a-stick"] = 1, mirror = 1, hydra = "y" })
    if ring_buffer_size ~= nil then
       if opts.virtio_net then
          fatal("setting --ring-buffer-size does not work with --virtio")
@@ -171,13 +172,18 @@ function run(args)
    end
 
    if opts.verbosity >= 1 then
-      local csv = csv_stats.CSVStatsTimer.new(opts.csv_file)
+      local csv = csv_stats.CSVStatsTimer.new(opts.csv_file, opts.hydra)
+      -- Why are the names cross-referenced like this?
+      local ipv4_tx = opts.hydra and 'ipv4rx' or 'IPv4 RX'
+      local ipv4_rx = opts.hydra and 'ipv4tx' or 'IPv4 TX'
+      local ipv6_tx = opts.hydra and 'ipv6rx' or 'IPv6 RX'
+      local ipv6_rx = opts.hydra and 'ipv6tx' or 'IPv6 TX'
       if use_splitter then
-         csv:add_app('v4v6', { 'v4', 'v4' }, { tx='IPv4 RX', rx='IPv4 TX' })
-         csv:add_app('v4v6', { 'v6', 'v6' }, { tx='IPv6 RX', rx='IPv6 TX' })
+         csv:add_app('v4v6', { 'v4', 'v4' }, { tx=ipv4_tx, rx=ipv4_rx })
+         csv:add_app('v4v6', { 'v6', 'v6' }, { tx=ipv6_tx, rx=ipv6_rx })
       else
-         csv:add_app('inetNic', { 'tx', 'rx' }, { tx='IPv4 RX', rx='IPv4 TX' })
-         csv:add_app('b4sideNic', { 'tx', 'rx' }, { tx='IPv6 RX', rx='IPv6 TX' })
+         csv:add_app('inetNic', { 'tx', 'rx' }, { tx=ipv4_tx, rx=ipv4_rx })
+         csv:add_app('b4sideNic', { 'tx', 'rx' }, { tx=ipv6_tx, rx=ipv6_rx })
       end
       csv:activate()
    end
