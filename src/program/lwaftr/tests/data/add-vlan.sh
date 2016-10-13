@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 # https://en.wikipedia.org/wiki/IEEE_802.1Q 
 # 802.1q payload:

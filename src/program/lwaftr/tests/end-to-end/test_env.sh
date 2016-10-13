@@ -1,4 +1,4 @@
-#/usr/bin/env bash
+#!/bin/sh
 
 COUNTERS="../data/counters"
 EMPTY="../data/empty.pcap"
