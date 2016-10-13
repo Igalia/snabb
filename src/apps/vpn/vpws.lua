@@ -88,6 +88,7 @@ function vpws:push()
             datagram:push(encap.gre)
             datagram:push(encap.ipv6)
             datagram:push(encap.ether)
+            p = datagram:packet()
          else
             -- Check for encapsulated frame coming in on uplink
             if self._filter:match(datagram:payload()) then
@@ -115,6 +116,7 @@ function vpws:push()
                  -- Unsupported GRE options or flags
                   valid = false
                end
+               p = datagram:packet()
                if not valid then
                   packet.free(p)
                   p = nil
