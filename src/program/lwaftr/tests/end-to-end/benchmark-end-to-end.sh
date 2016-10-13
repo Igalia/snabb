@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 SNABB_BASE=../../../..
 TEST_BASE=../data
