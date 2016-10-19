@@ -341,7 +341,7 @@ function load_soak_test(c, conf, inv4_pcap, inv6_pcap)
    link_sink(c, unpack(sinks))
 end
 
-local function load_soak_test_on_a_stick (c, conf, inv4_pcap, inv6_pcap)
+function load_soak_test_on_a_stick (c, conf, inv4_pcap, inv6_pcap)
    lwaftr_app(c, conf)
 
    config.app(c, "capturev4", pcap.PcapReader, inv4_pcap)
