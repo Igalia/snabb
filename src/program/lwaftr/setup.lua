@@ -93,7 +93,7 @@ local function link_apps(c, apps)
    end
 end
 
-function set_preprocessors(c, apps, dst)
+local function set_preprocessors(c, apps, dst)
    assert(type(apps) == "table")
    link_apps(c, apps)
    local last_app, output = apps[#apps], "output"
@@ -103,7 +103,7 @@ function set_preprocessors(c, apps, dst)
    config.link(c, ("%s.%s -> %s"):format(last_app, output, dst))
 end
 
-function set_postprocessors(c, src, apps)
+local function set_postprocessors(c, src, apps)
    assert(type(apps) == "table")
    local first_app, input = apps[1], "input"
    if type(first_app) == "table" then
@@ -113,17 +113,17 @@ function set_postprocessors(c, src, apps)
    link_apps(c, apps)
 end
 
-function link_source(c, v4_in, v6_in)
+local function link_source(c, v4_in, v6_in)
    config.link(c, v4_in..' -> reassemblerv4.input')
    config.link(c, v6_in..' -> reassemblerv6.input')
 end
 
-function link_sink(c, v4_out, v6_out)
+local function link_sink(c, v4_out, v6_out)
    config.link(c, 'fragmenterv4.output -> '..v4_out)
    config.link(c, 'fragmenterv6.output -> '..v6_out)
 end
 
-function load_phy(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci)
+local function load_phy(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci)
    lwaftr_app(c, conf)
 
    config.app(c, v4_nic_name, Intel82599, {
@@ -143,7 +143,7 @@ function load_phy(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci)
    link_sink(c, v4_nic_name..'.rx', v6_nic_name..'.rx')
 end
 
-function load_on_a_stick(c, conf, args)
+local function load_on_a_stick(c, conf, args)
    lwaftr_app(c, conf)
    local v4_nic_name, v6_nic_name, v4v6, pciaddr, mirror = args.v4_nic_name,
       args.v6_nic_name, args.v4v6, args.pciaddr, args.mirror
@@ -187,7 +187,7 @@ function load_on_a_stick(c, conf, args)
    end
 end
 
-function load_virt(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci)
+local function load_virt(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci)
    lwaftr_app(c, conf)
 
    config.app(c, v4_nic_name, VirtioNet, {
@@ -203,7 +203,7 @@ function load_virt(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci)
    link_sink(c, v4_nic_name..'.rx', v6_nic_name..'.rx')
 end
 
-function load_bench(c, conf, v4_pcap, v6_pcap, v4_sink, v6_sink)
+local function load_bench(c, conf, v4_pcap, v6_pcap, v4_sink, v6_sink)
    lwaftr_app(c, conf)
 
    config.app(c, "capturev4", pcap.PcapReader, v4_pcap)
@@ -230,7 +230,7 @@ function load_bench(c, conf, v4_pcap, v6_pcap, v4_sink, v6_sink)
    link_sink(c, v4_sink..'.input', v6_sink..'.input')
 end
 
-function load_check_on_a_stick (c, conf, inv4_pcap, inv6_pcap, outv4_pcap, outv6_pcap)
+local function load_check_on_a_stick (c, conf, inv4_pcap, inv6_pcap, outv4_pcap, outv6_pcap)
    lwaftr_app(c, conf)
 
    config.app(c, "capturev4", pcap.PcapReader, inv4_pcap)
@@ -275,7 +275,7 @@ function load_check_on_a_stick (c, conf, inv4_pcap, inv6_pcap, outv4_pcap, outv6
    link_sink(c, unpack(sinks))
 end
 
-function load_check(c, conf, inv4_pcap, inv6_pcap, outv4_pcap, outv6_pcap)
+local function load_check(c, conf, inv4_pcap, inv6_pcap, outv4_pcap, outv6_pcap)
    lwaftr_app(c, conf)
 
    config.app(c, "capturev4", pcap.PcapReader, inv4_pcap)
@@ -306,7 +306,7 @@ function load_check(c, conf, inv4_pcap, inv6_pcap, outv4_pcap, outv6_pcap)
    link_sink(c, unpack(sinks))
 end
 
-function load_soak_test(c, conf, inv4_pcap, inv6_pcap)
+local function load_soak_test(c, conf, inv4_pcap, inv6_pcap)
    lwaftr_app(c, conf)
 
    config.app(c, "capturev4", pcap.PcapReader, inv4_pcap)
@@ -341,7 +341,7 @@ function load_soak_test(c, conf, inv4_pcap, inv6_pcap)
    link_sink(c, unpack(sinks))
 end
 
-function load_soak_test_on_a_stick (c, conf, inv4_pcap, inv6_pcap)
+local function load_soak_test_on_a_stick (c, conf, inv4_pcap, inv6_pcap)
    lwaftr_app(c, conf)
 
    config.app(c, "capturev4", pcap.PcapReader, inv4_pcap)
