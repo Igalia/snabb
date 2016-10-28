@@ -73,7 +73,7 @@ function run(parameters)
    config.link(c, "aftr.v6 -> b4if.rx")
 
    if verbosity >= 1 then
-      local csv = CSVStatsTimer.new(bench_file)
+      local csv = CSVStatsTimer:new(bench_file)
       csv:add_app("inet", {"tx", "rx"}, { tx = "IPv4 TX", rx = "IPv4 RX" })
       csv:add_app("tob4", {"tx", "rx"}, { tx = "IPv6 TX", rx = "IPv6 RX" })
       csv:activate()
