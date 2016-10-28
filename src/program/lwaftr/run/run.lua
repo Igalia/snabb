@@ -82,9 +82,7 @@ function parse_args(args)
       opts["mirror"] = ifname
    end
    function handlers.y() opts.hydra = true end
-   handlers["bench-file"] = function (bench_file)
-      opts.bench_file = bench_file
-   end
+   function handlers.b(arg) opts.bench_file = arg end
    handlers["ingress-drop-monitor"] = function (arg)
       if arg == 'flush' or arg == 'warn' then
          opts.ingress_drop_monitor = arg
@@ -99,7 +97,7 @@ function parse_args(args)
    lib.dogetopt(args, handlers, "b:c:vD:yhir:",
       { conf = "c", v4 = 1, v6 = 1, ["v4-pci"] = 1, ["v6-pci"] = 1,
         verbose = "v", duration = "D", help = "h", virtio = "i", cpu = 1,
-        ["ring-buffer-size"] = "r", ["real-time"] = 0, ["bench-file"] = 0,
+        ["ring-buffer-size"] = "r", ["real-time"] = 0, ["bench-file"] = "b",
         ["ingress-drop-monitor"] = 1, ["on-a-stick"] = 1, mirror = 1, hydra = "y" })
    if ring_buffer_size ~= nil then
       if opts.virtio_net then

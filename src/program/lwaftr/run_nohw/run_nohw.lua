@@ -33,7 +33,7 @@ local function parse_args(args)
       I = function (arg)
          inet_if = arg
       end;
-      ["bench-file"] = function (arg)
+      b = function (arg)
          bench_file = arg
       end;
       h = function (arg)
@@ -44,7 +44,7 @@ local function parse_args(args)
    lib.dogetopt(args, handlers, "b:c:B:I:vh", {
       help = "h", conf = "c", verbose = "v",
       ["b4-if"] = "B", ["inet-if"] = "I",
-      ["bench-file"] = 0,
+      ["bench-file"] = "b",
    })
    check(conf_file, "no configuration specified (--conf/-c)")
    check(b4_if, "no B4-side interface specified (--b4-if/-B)")

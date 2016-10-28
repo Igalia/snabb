@@ -26,7 +26,7 @@ Optional arguments:
                                 rather than the default:
 
                                   Time (s),Decap. MPPS,Decap. Gbps,Encap. MPPS,Encap. Gbps
-       --bench-file FILENAME
+       -b FILENAME, --bench-file FILENAME
                                 The file or path name to which benchmark data is
                                 written. A simple filename or relative pathname
                                 will be based on the current directory. Default
