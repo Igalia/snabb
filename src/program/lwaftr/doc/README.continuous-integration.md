@@ -1,22 +1,23 @@
 # Continuous integration
 
-The Snabb project has a continuous integration lab, described in [the docs]
-(http://snabbco.github.io/#snabblab). The lab servers are used for checking
-correctness and performance of Snabb branches, before merging them into
-the master branch.
+The Snabb project has a continuous integration lab - the SnabbLab - described
+in [the Snabb docs](http://snabbco.github.io/#snabblab). The lab servers are
+used for checking correctness and performance of Snabb branches, before merging
+them into the master branch.
 
-The servers are handled by an [instance](https://hydra.snabb.co/) of
-[Hydra](https://nixos.org/hydra/), the continuous integration system of the
-[NixOS](http://nixos.org/) operating system, which the servers run.
+The servers are handled by [Hydra](https://nixos.org/hydra/), the continuous
+integration system of the [NixOS](http://nixos.org/) operating system, which
+the servers run.
 
 The code in the [snabblab-nixos](https://github.com/snabblab/snabblab-nixos)
-repo defines the Hydra jobs that are run by Snabb's Hydra, as well as the
-reports generated from the job results.
+repo defines the Hydra jobs that are run by [Snabb's Hydra instance]
+(https://hydra.snabb.co/). It also defines the reports generated from the job
+results.
 
 ## lwAftr benchmarks
 
 [One of the projects](https://hydra.snabb.co/project/igalia) on Snabb's Hydra
-hosts the lwAftr CI benchmarks. Three jobsets are currently defined:
+instance hosts the lwAftr CI benchmarks. Three jobsets are currently defined:
 
 - [lwaftr-bare](https://hydra.snabb.co/jobset/igalia/lwaftr-bare) runs the
   `snabb lwaftr bench` command, which executes lwAftr benchmarks with no
@@ -38,9 +39,9 @@ The parameters of each jobset are defined on its [configuration tab]
 lwAftr branch under test is pointed to a pair of parameters, named `snabbXname`
 and `snabbXsrc`, where `X` is an uppercase letter.
 
-A curve will be drawn on each report graph for each `snabbXname/snabbXsrc`
-pair, labeled with the `snabbXname` value, and showing benchmarks of the
-`snabbXsrc` branch.
+A curve is drawn on each report graph for each `snabbXname/snabbXsrc` pair,
+labeled with the `snabbXname` value, and showing benchmarks of the `snabbXsrc`
+branch.
 
 ## Reports
 
