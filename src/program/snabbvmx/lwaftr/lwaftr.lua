@@ -97,23 +97,17 @@ function run(args)
    local ingress_drop_interval = 1e6
    local ingress_drop_wait = 20
 
-   if file_exists(conf_file) then
-      conf = lib.load_conf(conf_file)
-      if not file_exists(conf.lwaftr) then
-         -- Search in main config file.
-         conf.lwaftr = lib.dirname(conf_file).."/"..conf.lwaftr
-      end
-      if not file_exists(conf.lwaftr) then
-         fatal(("lwAFTR conf file '%s' not found"):format(conf.lwaftr))
-      end
-      lwconf = require('apps.lwaftr.conf').load_lwaftr_config(conf.lwaftr)
-      lwconf.ipv6_mtu = lwconf.ipv6_mtu or 1500
-      lwconf.ipv4_mtu = lwconf.ipv4_mtu or 1460
-   else
-      print(("Interface '%s' set to passthru mode"):format(id))
-      ring_buffer_size = 1024
-      conf.settings = {}
+   conf = lib.load_conf(conf_file)
+   if not file_exists(conf.lwaftr) then
+      -- Search in main config file.
+      conf.lwaftr = lib.dirname(conf_file).."/"..conf.lwaftr
    end
+   if not file_exists(conf.lwaftr) then
+      fatal(("lwAFTR conf file '%s' not found"):format(conf.lwaftr))
+   end
+   lwconf = require('apps.lwaftr.conf').load_lwaftr_config(conf.lwaftr)
+   lwconf.ipv6_mtu = lwconf.ipv6_mtu or 1500
+   lwconf.ipv4_mtu = lwconf.ipv4_mtu or 1460
 
    if conf.settings then
       if conf.settings.ingress_drop_monitor then
