@@ -18,8 +18,31 @@ ingress_drop_monitor = {
    current_value = ffi.new('uint64_t[1]'),
 }
 
-function ingress_drop_monitor:sample ()
-   local app_array = engine.app_array
+function new(args)
+   local ret = {
+      threshold = args.threshold or 100000,
+      wait = args.wait or 20,
+      action = args.action or 'flush',
+      tips_url = args.tips_url or default_tips_url,
+      last_flush = 0,
+      last_value = ffi.new('uint64_t[1]'),
+      current_value = ffi.new('uint64_t[1]')
+   }
+   if args.counter then
+      if not args.counter:match(".counter$") then
+         args.counter = args.counter..".counter"
+      end
+      if not shm.exists(args.counter) then
+         ret.counter = counter.create(args.counter, 0)
+      else
+         ret.counter = counter.open(args.counter)
+      end
+   end
+   return setmetatable(ret, {__index=IngressDropMonitor})
+end
+
+function IngressDropMonitor:sample ()
+   local app_array = engine.breathe_push_order
    local sum = self.current_value
    sum[0] = 0
    for i = 1, #app_array do
