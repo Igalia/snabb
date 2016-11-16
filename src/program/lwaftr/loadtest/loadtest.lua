@@ -242,28 +242,28 @@ function run(args)
          if hydra_mode then
             -- Hydra reports prefer integers for the X (time) axis.
             -- TX
-            bench_file:write(('%s_tx_packets,%.f,%f,packets\n'):format(
-               stream.tx_name,gbps_bitrate,tx.txpackets))
-            bench_file:write(('%s_tx_mpps,%.f,%f,mpps\n'):format(
-               stream.tx_name,gbps_bitrate,tx_mpps))
-            bench_file:write(('%s_tx_bytes,%.f,%f,bytes\n'):format(
-               stream.tx_name,gbps_bitrate,tx.txbytes))
-            bench_file:write(('%s_tx_gbps,%.f,%f,gbps\n'):format(
-               stream.tx_name,gbps_bitrate,tx_gbps))
+            -- bench_file:write(('%s_tx_packets,%.f,%f,packets\n'):format(
+            --    stream.tx_name,gbps_bitrate,tx.txpackets))
+            -- bench_file:write(('%s_tx_mpps,%.f,%f,mpps\n'):format(
+            --    stream.tx_name,gbps_bitrate,tx_mpps))
+            -- bench_file:write(('%s_tx_bytes,%.f,%f,bytes\n'):format(
+            --    stream.tx_name,gbps_bitrate,tx.txbytes))
+            -- bench_file:write(('%s_tx_gbps,%.f,%f,gbps\n'):format(
+            --    stream.tx_name,gbps_bitrate,tx_gbps))
             -- RX
-            bench_file:write(('%s_rx_packets,%.f,%f,packets\n'):format(
-               stream.tx_name,gbps_bitrate,rx.txpackets))
+            -- bench_file:write(('%s_rx_packets,%.f,%f,packets\n'):format(
+            --    stream.tx_name,gbps_bitrate,rx.txpackets))
             bench_file:write(('%s_rx_mpps,%.f,%f,mpps\n'):format(
                stream.tx_name,gbps_bitrate,rx_mpps))
-            bench_file:write(('%s_rx_bytes,%.f,%f,bytes\n'):format(
-               stream.tx_name,gbps_bitrate,rx.txbytes))
+            -- bench_file:write(('%s_rx_bytes,%.f,%f,bytes\n'):format(
+            --    stream.tx_name,gbps_bitrate,rx.txbytes))
             bench_file:write(('%s_rx_gbps,%.f,%f,gbps\n'):format(
                stream.tx_name,gbps_bitrate,rx_gbps))
             -- Loss
             bench_file:write(('%s_ingress_drop,%.f,%f,packets\n'):format(
                stream.tx_name,gbps_bitrate,drop))
-            bench_file:write(('%s_lost_packets,%.f,%f,packets\n'):format(
-               stream.tx_name,gbps_bitrate,lost_packets))
+            -- bench_file:write(('%s_lost_packets,%.f,%f,packets\n'):format(
+            --    stream.tx_name,gbps_bitrate,lost_packets))
             bench_file:write(('%s_lost_percent,%.f,%f,percentage\n'):format(
                stream.tx_name,gbps_bitrate,lost_percent))
          else
