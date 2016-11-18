@@ -7,6 +7,7 @@ local ffi = require("ffi")
 local yang = require("lib.yang.yang")
 local data = require("lib.yang.data")
 local rpc = require("lib.yang.rpc")
+local state = require("lib.yang.state")
 local app = require("core.app")
 local shm = require("core.shm")
 local app_graph = require("core.config")
@@ -110,6 +111,10 @@ function Leader:rpc_set_config (args)
    local config = yang.load_data_for_schema_by_name(args.schema, args.config)
    self:reset_configuration(config)
    return {}
+end
+
+function Leader:rpc_get_state (args)
+    return {state=state.show_state(S.getpid(), args.path)}
 end
 
 function Leader:handle (payload)

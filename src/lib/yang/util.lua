@@ -80,6 +80,20 @@ function ipv4_ntop(addr)
    return ipv4:ntop(ffi.new('uint32_t[1]', lib.htonl(addr)))
 end
 
+-- This fakes a file, you can use this writer where you would a file and read
+-- the string that has been written to it.
+FakeFile = {}
+function FakeFile.new()
+    return setmetatable({}, {__index=FakeFile})
+end
+function FakeFile:write(str)
+    if self.contents == nil then
+        self.contents = str
+    else
+        self.contents = self.contents .. str
+    end
+end
+function FakeFile:flush() end
 function selftest()
    print('selftest: lib.yang.util')
    assert(tointeger('0') == 0)
@@ -97,5 +111,10 @@ function selftest()
    assert(tointeger('-0x8000000000000000') == -0x8000000000000000LL)
    assert(ipv4_pton('255.0.0.1') == 255 * 2^24 + 1)
    assert(ipv4_ntop(ipv4_pton('255.0.0.1')) == '255.0.0.1')
+
+   local ffile = FakeFile.new()
+   ffile:write("This is a test!")
+   ffile:write("\nI am not a real file")
+   assert(ffile.contents == "This is a test!\nI am not a real file")
    print('selftest: ok')
 end
