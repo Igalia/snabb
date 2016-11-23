@@ -1,6 +1,8 @@
 module(..., package.seeall)
 
+local S          = require("syscall")
 local config     = require("core.config")
+local worker     = require("core.worker")
 local leader     = require("apps.config.leader")
 local follower   = require("apps.config.follower")
 local Intel82599 = require("apps.intel.intel_app").Intel82599
@@ -451,9 +453,13 @@ function reconfigurable(f, graph, conf, ...)
       f(graph, conf, unpack(args))
       return graph
    end
+   local worker_code = [[
+      follower = require("apps.config.follower")
+      config.app(config.new(), "follower", follower.Follower, {})
+   ]]
+   local follower_pid = worker.start("follower", worker_code)
    config.app(graph, 'leader', leader.Leader,
-              { setup_fn = setup_fn, initial_configuration = conf,
-                follower_pids = { require('syscall').getpid() },
-                schema_name = 'snabb-softwire-v1'})
-   config.app(graph, "follower", follower.Follower, {})
+             { setup_fn = setup_fn, initial_configuration = conf,
+               follower_pids = { follower_pid },
+               schema_name = 'snabb-softwire-v1'})
 end
