@@ -454,12 +454,18 @@ function reconfigurable(f, graph, conf, ...)
       return graph
    end
    local worker_code = [[
-      follower = require("apps.config.follower")
-      config.app(config.new(), "follower", follower.Follower, {})
+      local follower = require("apps.config.follower")
+      local app = require("core.app")
+      local myconf = config.new()
+      config.app(myconf, "follower", follower.Follower, {})
+      app.configure(myconf)
+      app.busywait = true
+      app.main({})
    ]]
    local follower_pid = worker.start("follower", worker_code)
+   S.sleep(1)
    config.app(graph, 'leader', leader.Leader,
              { setup_fn = setup_fn, initial_configuration = conf,
-               follower_pids = { follower_pid },
+               follower_pids = {follower_pid+1},
                schema_name = 'snabb-softwire-v1'})
 end
