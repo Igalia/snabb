@@ -743,12 +743,273 @@ Test passed
 All end-to-end lwAFTR tests passed.
 ```
 
+## crafting packets via scapy
+
+the scapy tool can be used to craft packets (http://www.secdev.org/projects/scapy/).
+If using scapy, please make sure to run at minimum version 2.3.2.
+
+For below commands, please have scapy installed and started via "scapy"
+
+```
+lab@cgrafubuntu2:~/cg-ubuntu2/testing1.0$ scapy
+INFO: Can't import python gnuplot wrapper . Won't be able to plot.
+INFO: Can't import PyX. Won't be able to use psdump() or pdfdump().
+INFO: Can't import python Crypto lib. Won't be able to decrypt WEP.
+INFO: Can't import python Crypto lib. Disabled certificate manipulation tools
+Welcome to Scapy (2.3.2)
+>>>
+```
+
+**define IP packet**
+```
+a_ip=IP()
+```
+
+**options to show the packet fields**
+- ls(pkt)	have the list of fields values
+- pkt.summary()	for a one-line summary
+- pkt.show()	for a developped view of the packet
+- pkt.show2()	same as show but on the assembled packet (checksum is calculated, for instance)
+
+ls(pkt)
+```
+>>> ls (a_ip)
+version    : BitField (4 bits)         = 4               (4)
+ihl        : BitField (4 bits)         = None            (None)
+tos        : XByteField                = 0               (0)
+len        : ShortField                = None            (None)
+id         : ShortField                = 1               (1)
+flags      : FlagsField (3 bits)       = 0               (0)
+frag       : BitField (13 bits)        = 0               (0)
+ttl        : ByteField                 = 64              (64)
+proto      : ByteEnumField             = 0               (0)
+chksum     : XShortField               = None            (None)
+src        : SourceIPField (Emph)      = '127.0.0.1'     (None)
+dst        : IPField (Emph)            = '127.0.0.1'     ('127.0.0.1')
+options    : PacketListField           = []              ([])
+```
+
+pkt.summary()
+```
+>>> a_ip.summary()
+'192.168.1.1 > 127.0.0.1 hopopt'
+```
+
+pkt.show()
+```
+>>> a_ip.show()
+###[ IP ]###
+  version= 4
+  ihl= None
+  tos= 0x0
+  len= None
+  id= 1
+  flags=
+  frag= 0
+  ttl= 64
+  proto= hopopt
+  chksum= None
+  src= 192.168.1.1
+  dst= 127.0.0.1
+  \options\
+  ```
+  
+  pkt.show2()
+  ```
+  >>> a_ip.show2()
+###[ IP ]###
+  version= 4L
+  ihl= 5L
+  tos= 0x0
+  len= 20
+  id= 1
+  flags=
+  frag= 0L
+  ttl= 64
+  proto= hopopt
+  **chksum= 0x3a3f**
+  src= 192.168.1.1
+  dst= 127.0.0.1
+  \options\
+  ```
+  
+### change packet fields
+```
+>>> a_ip.src='192.168.1.1'
+>>> a_ip.show()
+###[ IP ]###
+  version= 4
+  ihl= None
+  tos= 0x0
+  len= None
+  id= 1
+  flags=
+  frag= 0
+  ttl= 64
+  proto= hopopt
+  chksum= None
+  src= 192.168.1.1
+  dst= 127.0.0.1
+  \options\
+```
+
+**crafting full l2/l3 header with ICMP echo-request**
+```
+>>> a_l2l3=Ether(src='90:e2:ba:94:2a:bc', dst='5c:45:27:15:a0:0d')/IP(src='10.0.1.100',dst='10.10.0.0')/ICMP(type=8, code=0, id=1024)
+
+>>> a_l2l3.show()
+###[ Ethernet ]###
+  dst= 5c:45:27:15:a0:0d
+  src= 90:e2:ba:94:2a:bc
+  type= IPv4
+###[ IP ]###
+     version= 4
+     ihl= None
+     tos= 0x0
+     len= None
+     id= 1
+     flags=
+     frag= 0
+     ttl= 64
+     proto= icmp
+     chksum= None
+     src= 10.0.1.100
+     dst= 10.10.0.0
+     \options\
+###[ ICMP ]###
+        type= echo-request
+        code= 0
+        chksum= None
+        id= 0x400
+        seq= 0x0
+>>>
+```
+
+**sending the frame to wire**
+Please make sure you have started scapy as root, otherwise sending the frame will lead into an error (error: [Errno 1] Operation not permitted)
+
+```
+>>> sendp(a_l2l3,iface='p4p1')
+.
+Sent 1 packets.
+```
+
+checking the result via tcpdump
+```
+lab@cgrafubuntu2:~/cg-ubuntu2/testing1.0$ sudo tcpdump -n -i p4p1 -e
+tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
+listening on p4p1, link-type EN10MB (Ethernet), capture size 262144 bytes
+04:33:23.800977 90:e2:ba:94:2a:bc > 5c:45:27:15:a0:0d, ethertype IPv4 (0x0800), length 42: 10.0.1.100 > 10.10.0.0: ICMP echo request, id 1024, seq 0, length 8
+```
+
+## crafting lw4o6 encapsulated packet
+
+scapy allows to craft as well the lw4o6 encapsulated packet.
+This time a udp-packet with src-port 1024 is crafted:
+
+```
+lw4o6=Ether(src='90:e2:ba:94:2a:bc', dst='5c:45:27:15:a0:0d')/IPv6(src='2a02:587:f710::40',dst='2a02:587:f700::100')/IP(src='10.0.1.100',dst='10.10.0.0')/UDP(sport=1024)
+
+>>> lw4o6.summary()
+'Ether / IPv6 / IP / UDP 10.0.1.100:1024 > 10.10.0.0:domain'
+
+>>> lw4o6.show()
+###[ Ethernet ]###
+  dst= 5c:45:27:15:a0:0d
+  src= 90:e2:ba:94:2a:bc
+  type= IPv6
+###[ IPv6 ]###
+     version= 6
+     tc= 0
+     fl= 0
+     plen= None
+     nh= IP
+     hlim= 64
+     src= 2a02:587:f710::40
+     dst= 2a02:587:f700::100
+###[ IP ]###
+        version= 4
+        ihl= None
+        tos= 0x0
+        len= None
+        id= 1
+        flags=
+        frag= 0
+        ttl= 64
+        proto= udp
+        chksum= None
+        src= 10.0.1.100
+        dst= 10.10.0.0
+        \options\
+###[ UDP ]###
+           sport= 1024
+           dport= domain
+           len= None
+           chksum= None
+           
+```
+
+sending this packet
+```
+>>> sendp(lw4o6,iface='p4p1')
+.
+Sent 1 packets.
+```
+
+checking the result via tcpdump
+```
+lab@cgrafubuntu2:~/cg-ubuntu2/testing1.0$ sudo tcpdump -n -i p4p1 -e
+tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
+listening on p4p1, link-type EN10MB (Ethernet), capture size 262144 bytes
+04:40:27.745410 90:e2:ba:94:2a:bc > 5c:45:27:15:a0:0d, ethertype IPv6 (0x86dd), length 82: 2a02:587:f710::40 > 2a02:587:f700::100: 10.0.1.100.1024 > 10.10.0.0.53: [|domain]
+```
 
 
+## Fragmentation
+
+### create IPv4 frags
+scapy allows to generate overlapping, overwriting, incomplete and just valid fragments.
+Below code just generates plain non-overlapping IPv4 fragments:
+```
+#!/usr/bin/python
+
+from scapy.all import *
+payload="A"*500+"B"*500
+
+a_lw4o6=Ether(src='90:e2:ba:94:2a:bc', dst='5c:45:27:15:a0:0d')/IPv6(src='2a02:587:f710::40',dst='2a02:587:f700::100',nh=44)/IPv6ExtHdrFragment(nh=4)/IP(src='10.0.1.100',dst='10.10.0.0')/UDP(sport=1024,dport=2000)/payload
+a_ipv4=Ether(src='90:e2:ba:94:2a:bc', dst='5c:45:27:15:a0:0d')/IP(src='10.0.1.100',dst='10.10.0.0')/ICMP(type=8, code=0, id=1024)/payload
+
+frags4=fragment(a_ipv4,fragsize=500)
+frags6=fragment6(a_lw4o6,500)
 
 
+# IPv4
+counter=1
+for fragment4 in frags4:
+    print "Packet no#"+str(counter)
+    print "==================================================="
+    fragment4.show() #displays each fragment
+    counter+=1
+    sendp(fragment4,iface='p4p1')
 
+# IPv6
+counter=1
+for fragment6 in frags6:
+    print "Packet no#"+str(counter)
+    print "==================================================="
+    fragment6.show() #displays each fragment
+    counter+=1
+    sendp(fragment6,iface='p4p1')
+```
 
+**verify generated fragments**
+```
+    07:08:36.728161 IP 10.0.1.100 > 10.10.0.0: ICMP echo request, id 1024, seq 0, length 504
+07:08:36.740157 IP 10.0.1.100 > 10.10.0.0: ip-proto-1
+07:08:36.752311 IP6 2a02:587:f710::40 > 2a02:587:f700::100: frag (0|432) IP truncated-ip - 596 bytes missing! 10.0.1.100.1024 > 10.10.0.0.2000: UDP, length 1000
+07:08:36.764283 IP6 2a02:587:f710::40 > 2a02:587:f700::100: frag (432|432)
+07:08:36.776292 IP6 2a02:587:f710::40 > 2a02:587:f700::100: frag (864|164)
+```
 
 
 
