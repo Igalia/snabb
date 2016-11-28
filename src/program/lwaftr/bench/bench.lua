@@ -36,6 +36,7 @@ function run(args)
                         inv4_pcap, inv6_pcap, 'sinkv4', 'sinkv6')
    app.configure(graph)
 
+   --[[
    local function start_sampling()
       local csv = csv_stats.CSVStatsTimer:new(opts.bench_file, opts.hydra)
       csv:add_app('sinkv4', { 'input' }, { input=opts.hydra and 'decap' or 'Decap.' })
@@ -43,6 +44,7 @@ function run(args)
       csv:activate()
    end
    timer.activate(timer.new('spawn_csv_stats', start_sampling, 1e6))
+   --]]
 
    app.busywait = true
    app.main({duration=opts.duration})
