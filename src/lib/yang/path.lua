@@ -263,7 +263,7 @@ function selftest()
          }
       }}]]
 
-   local scm = schemalib.load_schema(schema_src, "xpath-test")
+   local scm = schemalib.load_schema(schema_src, "xpath-test")()
    local grammar = datalib.data_grammar_from_schema(scm)
 
    -- Test path to lua path.
@@ -328,7 +328,7 @@ function selftest()
       }
    ]]
 
-   local fruit_scm = schemalib.load_schema(fruit_schema_src, "xpath-fruit-test")
+   local fruit_scm = schemalib.load_schema(fruit_schema_src, "xpath-fruit-test")()
    local fruit_prod = datalib.data_grammar_from_schema(fruit_scm)
    local fruit_data = datalib.load_data_for_schema(fruit_scm, fruit_data_src)
 

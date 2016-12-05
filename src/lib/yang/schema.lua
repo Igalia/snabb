@@ -598,6 +598,10 @@ end
 -- Warn on any "when", resolving them as being true.
 -- Resolve all augment and refine nodes. (TODO)
 function resolve(schema, features)
+   -- Convert the list style table to hashmap to speedup lookup
+   local featuremap = {}
+   for _, feature in pairs(features or {}) do featuremap[feature] = true end
+
    local function pop_prop(node, prop)
       local val = node[prop]
       node[prop] = nil
@@ -702,6 +706,9 @@ function resolve(schema, features)
          if not pcall(lookup, env, 'features', feature) then
             return nil, env
          end
+	 if featuremap[feature] == nil then
+	    return nil, env
+	 end
       end
 
       if node.type then
@@ -771,7 +778,7 @@ function resolve(schema, features)
          assert(not module_env.prefixes[v.prefix], 'duplicate prefix')
          -- CHECKME: Discarding body from import, just importing env.
          -- Is this OK?
-         local schema, env = load_schema_by_name(v.id, v.revision_date)
+         local schema, env = load_schema_by_name(v.id, v.revision_date)()
          local prefix = v.prefix
          module_env.prefixes[prefix] = schema.namespace
          for _,prop in ipairs({'extensions', 'features', 'identities',
@@ -791,7 +798,7 @@ function resolve(schema, features)
       return node, env
    end
    schema = shallow_copy(schema)
-   return link(schema, {features=(features or {}),
+   return link(schema, {features=(featuremap),
                         submodules=pop_prop(schema, 'submodules')})
 end
 
@@ -817,12 +824,16 @@ function parse_schema_file(filename)
 end
 
 function load_schema(src, filename)
-   local s, e = resolve(primitivize(parse_schema(src, filename)))
-   return inherit_config(s), e
+   return function (features)
+      local s, e = resolve(primitivize(parse_schema(src, filename)), features)
+      return inherit_config(s), e
+   end
 end
 function load_schema_file(filename)
-   local s, e = resolve(primitivize(parse_schema_file(filename)))
-   return inherit_config(s), e
+   return function(features)
+      local s, e = resolve(primitivize(parse_schema_file(filename)), features)
+      return inherit_config(s), e
+   end
 end
 function load_schema_by_name(name, revision)
    -- FIXME: @ is not valid in a Lua module name.
@@ -885,6 +896,7 @@ function selftest()
       }
 
       container fruit-bowl {
+         if-feature bowl;
          description "Represents a fruit bowl";
 
          leaf description {
@@ -898,7 +910,8 @@ function selftest()
       }
    }]]
 
-   local schema, env = load_schema(test_schema)
+   -- This test is with all the features enabled.
+   local schema, env = load_schema(test_schema)({"bowl"})
    assert(schema.id == "fruit")
    assert(schema.namespace == "urn:testing:fruit")
    assert(schema.prefix == "fruit")
@@ -941,12 +954,16 @@ function selftest()
    assert(desc.type.id == "string")
    assert(desc.description == "About the bowl")
 
+   -- Verify when features are missing - parts with "if-feature" are disabled.
+   local schema, env = load_schema(test_schema)()
+   assert(schema.body['fruit-bowl'] == nil)
+
    parse_schema(require('lib.yang.ietf_yang_types_yang'))
    parse_schema(require('lib.yang.ietf_inet_types_yang'))
 
-   load_schema_by_name('ietf-yang-types')
-   load_schema_by_name('ietf-softwire')
-   load_schema_by_name('snabb-softwire-v1')
+   load_schema_by_name('ietf-yang-types')()
+   load_schema_by_name('ietf-softwire')()
+   load_schema_by_name('snabb-softwire-v1')()
 
    local inherit_config_schema = [[module config-inheritance {
       namespace cs;
@@ -973,7 +990,7 @@ function selftest()
       container garply { config false; uses quux; }
    }]]
 
-   local icschema = load_schema(inherit_config_schema)
+   local icschema = load_schema(inherit_config_schema)()
 
    -- Test things that should be null, still are.
    assert(icschema.config == nil)

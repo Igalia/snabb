@@ -22,7 +22,7 @@ end
 local softwire_grammar
 local function get_softwire_grammar()
    if not softwire_grammar then
-      local schema = yang.load_schema_by_name('snabb-softwire-v1')
+      local schema = yang.load_schema_by_name('snabb-softwire-v1')()
       local grammar = data.data_grammar_from_schema(schema)
       softwire_grammar =
          assert(grammar.members['softwire-config'].

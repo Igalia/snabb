@@ -413,8 +413,8 @@ function load_data_for_schema(schema, str, filename)
    return data_parser_from_schema(schema)(str, filename)
 end
 
-function load_data_for_schema_by_name(schema_name, str, filename)
-   local schema = schema.load_schema_by_name(schema_name)
+function load_data_for_schema_by_name(schema_name, str, filename, features)
+   local schema = schema.load_schema_by_name(schema_name)(features)
    return load_data_for_schema(schema, str, filename)
 end
 
@@ -637,8 +637,8 @@ function print_data_for_schema(schema, data, file)
    return data_printer_from_schema(schema)(data, file)
 end
 
-function print_data_for_schema_by_name(schema_name, data, file)
-   local schema = schema.load_schema_by_name(schema_name)
+function print_data_for_schema_by_name(schema_name, data, file, features)
+   local schema = schema.load_schema_by_name(schema_name)(features)
    return print_data_for_schema(schema, data, file)
 end
 
@@ -676,7 +676,7 @@ function selftest()
          description "internet of fruit";
          type inet:ipv4-address;
       }
-   }]])
+   }]])()
 
    local data = load_data_for_schema(test_schema, [[
      fruit-bowl {

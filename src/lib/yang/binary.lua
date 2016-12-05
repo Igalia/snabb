@@ -271,9 +271,10 @@ function compile_data_for_schema(schema, data, filename, source_mtime)
    return data_compiler_from_schema(schema)(data, filename, source_mtime)
 end
 
-function compile_data_for_schema_by_name(schema_name, data, filename, source_mtime)
-   return compile_data_for_schema(schema.load_schema_by_name(schema_name),
-                                  data, filename, source_mtime)
+function compile_data_for_schema_by_name(schema_name, data, filename, source_mtime, features)
+   return compile_data_for_schema(
+      schema.load_schema_by_name(schema_name)(features), data, filename,
+      source_mtime)
 end
 
 -- Hackily re-use the YANG serializer for Lua data consisting of tables,
@@ -441,7 +442,7 @@ function selftest()
             leaf port { type uint8 { range 0..11; } mandatory true; }
          }
       }
-   }]])
+   }]])()
    local data = data.load_data_for_schema(test_schema, [[
       is-active true;
       integers 1;
