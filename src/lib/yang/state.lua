@@ -85,7 +85,7 @@ local function set_data_value(data, path, value)
 end
 
 function show_state(scm, pid, raw_path)
-   local schema = yang.load_schema_by_name(scm)
+   local schema = yang.load_schema_by_name(scm)()
    local grammar = yang_data.data_grammar_from_schema(schema)
    local counters = find_counters(pid)
    local path = xpath.convert_path(grammar, raw_path)
@@ -163,7 +163,7 @@ function selftest ()
    end
 
    local simple_router_schema = yang.load_schema(simple_router_schema_src,
-						 "state-test")
+						 "state-test")()
    local leaves = collect_state_leaves(simple_router_schema)()
 
    -- Check the correct number of leaves have been found

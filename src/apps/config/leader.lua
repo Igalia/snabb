@@ -119,8 +119,11 @@ local function path_printer_for_schema(schema, path)
    return path_printer_for_grammar(data.data_grammar_from_schema(schema), path)
 end
 
-local function path_printer_for_schema_by_name(schema_name, path)
-   return path_printer_for_schema(yang.load_schema_by_name(schema_name), path)
+local function path_printer_for_schema_by_name(schema_name, path, features)
+   return path_printer_for_schema(
+      yang.load_schema_by_name(schema_name)(features),
+      path
+   )
 end
 
 function Leader:rpc_get_config (args)
@@ -139,8 +142,11 @@ local function path_parser_for_schema(schema, path)
    return path_parser_for_grammar(data.data_grammar_from_schema(schema), path)
 end
 
-local function path_parser_for_schema_by_name(schema_name, path)
-   return path_parser_for_schema(yang.load_schema_by_name(schema_name), path)
+local function path_parser_for_schema_by_name(schema_name, path, features)
+   return path_parser_for_schema(
+      yang.load_schema_by_name(schema_name)(features),
+      path
+   )
 end
 
 local function path_setter_for_grammar(grammar, path)
@@ -216,8 +222,11 @@ local function path_setter_for_schema(schema, path)
    return path_setter_for_grammar(data.data_grammar_from_schema(schema), path)
 end
 
-function compute_set_config_fn (schema_name, path)
-   return path_setter_for_schema(yang.load_schema_by_name(schema_name), path)
+function compute_set_config_fn (schema_name, path, features)
+   return path_setter_for_schema(
+      yang.load_schema_by_name(schema_name)(features),
+      path
+   )
 end
 
 local function path_adder_for_grammar(grammar, path)
@@ -296,8 +305,11 @@ local function path_adder_for_schema(schema, path)
    return path_adder_for_grammar(data.data_grammar_from_schema(schema), path)
 end
 
-function compute_add_config_fn (schema_name, path)
-   return path_adder_for_schema(yang.load_schema_by_name(schema_name), path)
+function compute_add_config_fn (schema_name, path, features)
+   return path_adder_for_schema(
+      yang.load_schema_by_name(schema_name)(features),
+      path
+   )
 end
 
 local function path_remover_for_grammar(grammar, path)
@@ -375,8 +387,11 @@ local function path_remover_for_schema(schema, path)
    return path_remover_for_grammar(data.data_grammar_from_schema(schema), path)
 end
 
-function compute_remove_config_fn (schema_name, path)
-   return path_remover_for_schema(yang.load_schema_by_name(schema_name), path)
+function compute_remove_config_fn (schema_name, path, features)
+   return path_remover_for_schema(
+      yang.load_schema_by_name(schema_name)(features),
+      path
+   )
 end
 
 function Leader:update_configuration (schema_name, update_fn, verb, path, ...)

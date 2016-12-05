@@ -23,6 +23,15 @@ module snabb-simple-router {
 
   leaf active { type boolean; default true; }
 
+  feature blocking {
+    description "The ability to block ips";
+  }
+
+  leaf-list {
+    if-feature blocking;
+    type: inet:ipv4-address;
+  }
+
   container routes {
     list route {
       key addr;
@@ -64,6 +73,13 @@ name the above file `snabb-simple-router.yang` and place it in the
 `load_schema_by_name('snabb-simple-router')` will find it
 appropriately.  Indeed, this is how the `ietf-inet-types` import in
 the above example was resolved.
+
+When loading a schema, a getter is returned which takes a table of
+features that are supported. The table is a simple lua list. The
+example of the `snabb-simple-router` this would look like
+`load_schema_by_name('snabb-simple-router')({"blocking"})`. Calling
+the getting without arguments is the same as calling it without any
+supported features.
 
 #### Configuration syntax
 

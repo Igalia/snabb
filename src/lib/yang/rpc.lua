@@ -6,16 +6,16 @@ local schema = require("lib.yang.schema")
 local data = require("lib.yang.data")
 local util = require("lib.yang.util")
 
-function prepare_callee(schema_name)
-   local schema = schema.load_schema_by_name(schema_name)
+function prepare_callee(schema_name, features)
+   local schema = schema.load_schema_by_name(schema_name)(features)
    return {
       parse_input = data.rpc_input_parser_from_schema(schema),
       print_output = data.rpc_output_printer_from_schema(schema)
    }
 end
 
-function prepare_caller(schema_name)
-   local schema = schema.load_schema_by_name('snabb-config-leader-v1')
+function prepare_caller(schema_name, features)
+   local schema = schema.load_schema_by_name('snabb-config-leader-v1')(features)
    return {
       print_input = data.rpc_input_printer_from_schema(schema),
       parse_output = data.rpc_output_parser_from_schema(schema)

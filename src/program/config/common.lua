@@ -24,8 +24,8 @@ local parse_command_line_opts = {
    require_schema = { default=false }
 }
 
-local function path_grammar(schema_name, path)
-   local schema = yang.load_schema_by_name(schema_name)
+local function path_grammar(schema_name, path, features)
+   local schema = yang.load_schema_by_name(schema_name)(features)
    local grammar = data.data_grammar_from_schema(schema)
    local getter, subgrammar = path_resolver(grammar, path)
    return subgrammar
