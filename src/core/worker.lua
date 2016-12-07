@@ -36,7 +36,14 @@ function start (name, luacode)
       -- binary being executed is not setuid or setgid. This may or
       -- may not be adequate.
       S.prctl("set_pdeathsig", "hup")
-      -- Symlink the shm "group" folder to be shared via the parent process.
+
+      -- Upstream symlinks the shm "group" folder to be shared via the parent
+      -- process. For the lwaftr's current use case, where the network card is
+      -- being initialized from the worker in the child process, that approach
+      -- does not work. As a temporary measure, to be able to use the card at
+      -- all, we are explicitly not creating that sym link.
+      -- FIXME: either make this work with a 'group' alias, or suggest an
+      -- alternative to upstream.
       -- shm.alias("group", "/"..S.getppid().."/group")
       -- Save the code we want to run in the environment.
       S.setenv("SNABB_PROGRAM_LUACODE", luacode, true)
