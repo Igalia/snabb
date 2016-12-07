@@ -28,7 +28,7 @@ function start (name, luacode)
    if pid == 0 then
       -- First we perform some initialization functions and then we
       -- restart the process with execv().
-      
+
       -- Terminate automatically when the parent dies.
       --
       -- XXX This prctl setting needs to survive execve(). The Linux
@@ -37,7 +37,7 @@ function start (name, luacode)
       -- may not be adequate.
       S.prctl("set_pdeathsig", "hup")
       -- Symlink the shm "group" folder to be shared via the parent process.
-      shm.alias("group", "/"..S.getppid().."/group")
+      -- shm.alias("group", "/"..S.getppid().."/group")
       -- Save the code we want to run in the environment.
       S.setenv("SNABB_PROGRAM_LUACODE", luacode, true)
       -- Restart the process with execve().
