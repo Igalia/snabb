@@ -833,6 +833,8 @@ function LwAftr:push ()
          if msg.kind == messages.lwaftr_message_reload then
             print('Reloading binding table.')
             self.binding_table = bt.load(self.conf.binding_table)
+            self.inet_lookup_queue = bt.BTLookupQueue.new(self.binding_table)
+            self.hairpin_lookup_queue = bt.BTLookupQueue.new(self.binding_table)
             -- We don't know why yet, but something about reloading a
             -- binding table makes LuaJIT switch to side traces instead
             -- of main traces.  Very weird.  Flushing the JIT state
