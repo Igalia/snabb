@@ -17,6 +17,9 @@ The following global metrics will be displayed:
   breaths/s
                              Engine breaths per second.
 
+  Per-breath latency
+                             1 second min/avg/max, 5s and 30s max.
+
 The following metrics will be displayed per link:
 
   rx

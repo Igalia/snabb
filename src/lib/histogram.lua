@@ -109,6 +109,7 @@ end
 
 -- Now the histogram code.
 
+local num_buckets = 509
 -- Fill a 4096-byte page with buckets.  4096/8 = 512, minus the three
 -- header words means 509 buckets.  The first and last buckets are catch-alls.
 local histogram_t = ffi.typeof([[struct {
@@ -123,7 +124,7 @@ local function compute_growth_factor_log(minimum, maximum)
    assert(maximum > minimum)
    -- 507 buckets for precise steps within minimum and maximum, 2 for
    -- the catch-alls.
-   return log(maximum / minimum) / 507
+   return log(maximum / minimum) / (num_buckets - 2)
 end
 
 function new(minimum, maximum)
@@ -151,47 +152,92 @@ function add(histogram, measurement)
       bucket = bucket / histogram.growth_factor_log
       bucket = floor(bucket) + 1
       bucket = max(0, bucket)
-      bucket = min(508, bucket)
+      bucket = min(num_buckets - 1, bucket)
    end
    histogram.count = histogram.count + 1
    histogram.buckets[bucket] = histogram.buckets[bucket] + 1
 end
 
 function report(histogram, prev)
-   local lo, hi = 0, histogram.minimum
-   local factor = math.exp(histogram.growth_factor_log)
    local total = histogram.count
    if prev then total = total - prev.count end
    total = tonumber(total)
-   for bucket = 0, 508 do
-      local count = histogram.buckets[bucket]
-      if prev then count = count - prev.buckets[bucket] end
-      if count ~= 0 then
-         print(string.format('%.3e - %.3e: %u (%.5f%%)', lo, hi, tonumber(count),
-                             tonumber(count) / total * 100.))
+   for bval, idx, lo, hi, total_count in histogram do
+      if prev then bval = bval - prev.buckets[idx] end
+      if bval ~= 0 then
+         print(string.format('%.3e - %.3e: %u (%.5f%%)', lo, hi, tonumber(bval),
+                             tonumber(bval) / total * 100.))
       end
-      lo, hi = hi, hi * factor
    end
 end
 
+local past_stats = {}
+local past_stats_max_records = 31
+
+local function record_stats(cur, prev)
+   local num_stats = #past_stats
+   local max = past_stats_max_records
+   if num_stats == 0 then
+      past_stats[1] = prev
+      past_stats[2] = cur
+   elseif num_stats == max then
+      for i=1,max-1 do
+         past_stats[i] = past_stats[i+1]
+      end
+      past_stats[max] = cur
+   else
+      past_stats[num_stats + 1] = cur
+   end
+end
+
+-- Get the maximum recorded latency within the last N observations
+-- Ignore the oldest observation, aside from subtracting counts,
+-- regardless of the value of n. Reduce n if it's bigger than
+-- the available amount of recorded data.
+
+local function get_max(n)
+   if n >= #past_stats then n = #past_stats - 1 end
+   local max = 0
+   local last = #past_stats
+   local first = math.max(last - n, 2)
+   for i=first,last do
+      local lo, hi = 0, past_stats[last].minimum
+      local factor = math.exp(past_stats[i].growth_factor_log)
+      for j = 0, (num_buckets - 1) do
+         local count = past_stats[i].buckets[j]
+            count = count - past_stats[i-1].buckets[j]
+         if count > 0 then
+             if hi > max then max = hi end
+         end
+         lo, hi = hi, hi * factor
+      end
+   end
+   return max
+end
+
+-- Return the following stats:
+-- 1s min, 1s avg, 1s max, 5s max, 30s max
 function summarize(histogram, prev)
+   record_stats(histogram, prev)
    local lo, hi = 0, histogram.minimum
    local factor = math.exp(histogram.growth_factor_log)
    local total = histogram.count
    if prev then total = total - prev.count end
    total = tonumber(total)
-   local min, max, cumulative = 1/0, 0, 0
-   for bucket = 0, 508 do
+   local min, cumulative, max1, max5, max30 = 1/0, 0, 0, 0, 0
+   for bucket = 0, num_buckets - 1 do
       local count = histogram.buckets[bucket]
       if prev then count = count - prev.buckets[bucket] end
       if count ~= 0 then
          if lo < min then min = lo end
-         if hi > max then max = hi end
+         if hi > max1 then max1 = hi end
          cumulative = cumulative + (lo + hi) / 2 * tonumber(count)
       end
       lo, hi = hi, hi * factor
    end
-   return min, cumulative / total, max
+   local max5 = get_max(5)
+   local max30 = get_max(30)
+   return min, cumulative / total, max1, max5, max30
 end
 
 function snapshot(a, b)
@@ -202,7 +248,7 @@ end
 
 function clear(histogram)
    histogram.count = 0
-   for bucket = 0, 508 do histogram.buckets[bucket] = 0 end
+   for bucket = 0, (num_buckets - 1) do histogram.buckets[bucket] = 0 end
 end
 
 function wrap_thunk(histogram, thunk, now)
@@ -213,8 +259,25 @@ function wrap_thunk(histogram, thunk, now)
    end
 end
 
+function iterate(histogram)
+   print("histogram is", histogram, histogram.growth_factor_log)
+   local lo = histogram.minimum
+   local count = histogram.count
+   local hi = lo * (math.exp(histogram.growth_factor_log)^(num_buckets - 2))
+   local entry = 0
+   local max_entry = num_buckets
+   local function next_entry()
+      if entry < max_entry then
+         entry = entry + 1
+         return histogram.buckets[entry - 1], lo, hi, count
+      end
+   end
+   return next_entry
+end
+
 ffi.metatype(histogram_t, {__index = {
    add = add,
+   iterate = iterate,
    report = report,
    summarize = summarize,
    snapshot = snapshot,
@@ -242,6 +305,10 @@ function selftest ()
    assert(h:snapshot().buckets[508] == 1)
 
    h:report()
+
+   for bucket_val, idx, lo, hi, count in h:iterate() do
+      print('bucket_val, idx, lo, hi, count:', bucket_val, idx, lo, hi, count)
+   end
 
    h:clear()
    assert(h.count == 0)

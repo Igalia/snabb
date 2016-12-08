@@ -123,15 +123,17 @@ function print_global_metrics (new_stats, last_stats)
              {float_s(frees / 1000), float_s(bytes / (1000^3)), tostring(breaths)})
 end
 
+local global_latency_row = {15, 15, 15, 15, 15}
 function print_latency_metrics (new_stats, last_stats)
    local cur, prev = new_stats.latency, last_stats.latency
    if not cur then return end
-   local min, avg, max = cur:summarize(prev)
-   print_row(global_metrics_row,
-             {"Min breath (us)", "Average", "Maximum"})
+   local min, avg, max1, max5, max30 = cur:summarize(prev)
+   print_row(global_latency_row,
+             {"Min breath (us)", "Average (us)", "1s Max (us)", "5s Max (us)", "30s Max (us)"})
    
-   print_row(global_metrics_row,
-             {float_s(min*1e6), float_s(avg*1e6), float_s(max*1e6)})
+   print_row(global_latency_row,
+             {float_s(min*1e6), float_s(avg*1e6), float_s(max1*1e6),
+              float_s(max5*1e6), float_s(max30*1e6)})
    print("\n")
 end
 
