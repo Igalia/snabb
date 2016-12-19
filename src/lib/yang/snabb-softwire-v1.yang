@@ -348,7 +348,7 @@ module snabb-softwire-v1 {
     }
 
     list softwire {
-      key "ipv4 psid padding";
+      key "ipv4 psid";
 
       leaf ipv4 {
         type inet:ipv4-address;
@@ -362,13 +362,6 @@ module snabb-softwire-v1 {
         mandatory true;
         description
          "Port set ID.";
-      }
-
-      leaf padding {
-        type uint16 { range 0..0; }
-        default 0;
-        description
-         "Reserved bytes.";
       }
 
       leaf br {
