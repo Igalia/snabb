@@ -331,12 +331,6 @@ module snabb-softwire-v1 {
       }
     }
 
-    leaf-list br-address {
-      type inet:ipv6-address;
-      description
-       "B4-facing address of an lwAFTR.";
-    }
-
     list softwire {
       key "ipv4 psid padding";
 
@@ -361,12 +355,11 @@ module snabb-softwire-v1 {
          "Reserved bytes.";
       }
 
-      leaf br {
-        type uint32;
-        default 0;
+      leaf br-address {
+        type inet:ipv6-address;
+        mandatory true;
         description
-         "The B4-facing address of the lwAFTR for this softwire, as
-          a zero-based index into br-addresses.";
+         "The B4-facing IPv6 address of the lwAFTR for this softwire.";
       }
 
       leaf b4-ipv6 {
