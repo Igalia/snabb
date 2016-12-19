@@ -327,7 +327,7 @@ module snabb-softwire-v1 {
       }
 
       list softwire {
-        key "ipv4 psid padding";
+        key "ipv4 psid";
 
         leaf ipv4 {
           type inet:ipv4-address;
