@@ -335,6 +335,7 @@ module snabb-softwire-v1 {
       type inet:ipv6-address;
       description
        "B4-facing address of an lwAFTR.";
+      ordered-by user;
     }
 
     list softwire {
@@ -366,7 +367,7 @@ module snabb-softwire-v1 {
         default 0;
         description
          "The B4-facing address of the lwAFTR for this softwire, as
-          a zero-based index into br-addresses.";
+          a zero-based index into br-address.";
       }
 
       leaf b4-ipv6 {
