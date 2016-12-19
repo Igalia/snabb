@@ -154,8 +154,13 @@ module snabb-softwire-v1 {
       leaf mtu {
         type uint16;
         default 1460;
+        range "68..max";
+        units "bytes";
         description
-         "Maximum packet size to send on the IPv4 interface.";
+         "Maximum packet size to send on the IPv4 interface.
+         Including IP header but excluding low layer protocols, like
+         overhead of Ethernet header.";
+
       }
 
       uses traffic-filters;
@@ -204,8 +209,12 @@ module snabb-softwire-v1 {
       leaf mtu {
         type uint16;
         default 1500;
+        range "1280..max";
+        units "bytes";
         description
-         "Maximum packet size to sent on the IPv6 interface.";
+         "Maximum packet size to send on the IPv6 interface. 
+         Including IP header but excluding low layer protocols, like
+         overhead of Ethernet header.";
       }
 
       uses traffic-filters;
