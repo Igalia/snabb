@@ -77,7 +77,6 @@ psid_map_value_t = ffi.typeof[[
 softwire_key_t = ffi.typeof[[
    struct {
       uint32_t ipv4;       // Public IPv4 address of this softwire (host-endian).
-      uint16_t padding;    // Zeroes.
       uint16_t psid;       // Port set ID.
    } __attribute__((packed))
 ]]
