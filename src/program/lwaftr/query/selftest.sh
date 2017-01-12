@@ -13,6 +13,7 @@ if [[ -z "$SNABB_PCI1" ]]; then
 fi
 
 LWAFTR_CONF=./program/lwaftr/tests/data/no_icmp.conf
+TEMP_FILE=$(mktemp)
 
 function tmux_launch {
     command="$2 2>&1 | tee $3"
@@ -30,17 +31,23 @@ function kill_lwaftr {
 
 function cleanup {
     kill_lwaftr
+    rm -f $TEMP_FILE
     exit
 }
 
 trap cleanup EXIT HUP INT QUIT TERM
 
-function get_lwaftr_instance {
-    pids=$(ps aux | grep $SNABB_PCI0 | awk '{print $2}')
-    for pid in ${pids[@]}; do
-        if [[ -d "/var/run/snabb/$pid/apps/lwaftr" ]]; then
-            echo $pid 
-        fi
+function get_lwaftr_follower {
+    local leaders=$(ps aux | grep "\-\-reconfigurable" | grep $SNABB_PCI0 | grep -v "grep" | awk '{print $2}')
+    for pid in $(ls /var/run/snabb); do
+        for leader in ${leaders[@]}; do
+            if [[ -L "/var/run/snabb/$pid/group" ]]; then
+                local target=$(ls -l /var/run/snabb/$pid/group | awk '{print $11}' | grep -oe "[0-9]\+")
+                if [[ "$leader" == "$target" ]]; then
+                    echo $pid
+                fi
+            fi
+        done
     done
 }
 
@@ -51,35 +58,29 @@ function fatal {
 }
 
 function test_lwaftr_query {
-    local pid=$1
-    # FIXME: Sometimes lwaftr query gets stalled. Add timeout.
-    local lineno=`timeout 1 ./snabb lwaftr query $pid | wc -l`
+    ./snabb lwaftr query $@ > $TEMP_FILE
+    local lineno=`cat $TEMP_FILE | wc -l`
     if [[ $lineno -gt 1 ]]; then
-        echo "Success: lwaftr query $pid"
+        echo "Success: lwaftr query $@"
     else
-        fatal "lwaftr query $pid"
-    fi
-}
-
-function test_lwaftr_query_filter {
-    local pid=$1
-    local filter=$2
-    local lineno=`timeout 1 ./snabb lwaftr query $pid $filter | wc -l`
-    if [[ $lineno -gt 1 ]]; then
-        echo "Success: lwaftr query $pid $filter"
-    else
-        fatal "lwaftr query $pid"
+        fatal "lwaftr query $@"
     fi
 }
 
 # Run lwAFTR.
-tmux_launch "lwaftr" "./snabb lwaftr run --reconfigurable --conf $LWAFTR_CONF --v4 $SNABB_PCI0 --v6 $SNABB_PCI1"
+tmux_launch "lwaftr" "./snabb lwaftr run --reconfigurable --name lwaftr --conf $LWAFTR_CONF --v4 $SNABB_PCI0 --v6 $SNABB_PCI1" "lwaftr.log"
 sleep 2
 
-# Run tests.
-pid=$(get_lwaftr_instance)
+# Test query all.
+test_lwaftr_query -l
+
+# Test query by pid.
+pid=$(get_lwaftr_follower)
 if [[ -n "$pid" ]]; then
     test_lwaftr_query $pid
-    test_lwaftr_query $pid -l
-    test_lwaftr_query_filter $pid "memuse-ipv"
+    test_lwaftr_query $pid "memuse-ipv"
 fi
+
+# Test query by name.
+test_lwaftr_query "--name lwaftr"
+test_lwaftr_query "--name lwaftr memuse-ipv"
