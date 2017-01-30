@@ -1,6 +1,8 @@
 # Run like this:
-#   nix-build /path/to/this/directory/tarball.nix
-# ... and the files are produced in ./result/
+#   nix-build --argstr name snabb-lwaftr ./tarball.nix
+# and the release tarball will be written to ./result/nix-support .
+# It will contain both the sources and the executable, patched to run on
+# Linux LSB systems.
 
 { nixpkgs ? <nixpkgs>
 , name ? "snabb"
