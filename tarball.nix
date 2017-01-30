@@ -10,12 +10,16 @@
 pkgs.stdenv.mkDerivation rec {
   inherit name src;
 
-  buildInputs = with pkgs; [ git patchelf ];
+  buildInputs = with pkgs; [ git makeWrapper patchelf ];
 
   postUnpack = ''
     export DISTDIR="$out/${name}-`cd snabb; git describe --tags`"
     mkdir -p $DISTDIR
     cp -a $sourceRoot/* $DISTDIR
+  '';
+
+  preBuild = ''
+    make clean
   '';
 
   installPhase = ''
@@ -37,7 +41,7 @@ pkgs.stdenv.mkDerivation rec {
     # Remove a leftover stray binary. FIXME: should not happen.
     rm "$DISTDIR/src/snabb"
     tar Jcf $DISTDIR.tar.xz *
-# TODO: make tarball available through Hydra.
-#    cp -av $DISTDIR.tar.xz "$out"
+    # Make tarball available through Hydra.
+    cp -av $DISTDIR.tar.xz "$out/nix-support/hydra-build-products"
   '';
 }
