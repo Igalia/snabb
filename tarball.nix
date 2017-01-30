@@ -2,20 +2,22 @@
 #   nix-build /path/to/this/directory/tarball.nix
 # ... and the files are produced in ./result/
 
-{ pkgs ? (import <nixpkgs> {})
+{ nixpkgs ? <nixpkgs>
 , name ? "snabb"
 , src ? ./.
 }:
 
-pkgs.stdenv.mkDerivation rec {
+let
+  pkgs = import nixpkgs {};
+in pkgs.stdenv.mkDerivation rec {
   inherit name src;
 
   buildInputs = with pkgs; [ git makeWrapper patchelf ];
 
   postUnpack = ''
-    export DISTDIR="$out/${name}-`cd snabb; git describe --tags`"
-    mkdir -p $DISTDIR
-    cp -a $sourceRoot/* $DISTDIR
+    export DISTNAME="$out/${name}-`cd snabb; git describe --tags | cut -d '-' -f 1`"
+    mkdir -p $DISTNAME
+    cp -a $sourceRoot/* $DISTNAME
   '';
 
   preBuild = ''
@@ -36,12 +38,13 @@ pkgs.stdenv.mkDerivation rec {
 
   distPhase = ''
     cd "$out"
-    # The tarball will only contain the DISTDIR and the "snabb" binary.
-    export DISTDIR=`ls -I snabb`
+    # $out will only contain the DISTNAME directory and the "snabb" binary.
+    export DISTNAME=`ls -I snabb`
     # Remove a leftover stray binary. FIXME: should not happen.
-    rm "$DISTDIR/src/snabb"
-    tar Jcf $DISTDIR.tar.xz *
+    rm "$DISTNAME/src/snabb"
+    tar Jcf $DISTNAME.tar.xz *
     # Make tarball available through Hydra.
-    cp -av $DISTDIR.tar.xz "$out/nix-support/hydra-build-products"
+    mkdir -p "$out/nix-support"
+    mv $DISTNAME.tar.xz "$out/nix-support"
   '';
 }
