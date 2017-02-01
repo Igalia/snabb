@@ -28,25 +28,25 @@ in {
     # '';
 
     installPhase = ''
-      mv src/snabb "$out"
+      mv src/snabb $out
     '';
 
     fixupPhase = ''
-      patchelf --shrink-rpath "$out/snabb"
-      patchelf --set-rpath /lib/x86_64-linux-gnu "$out/snabb"
-      patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 "$out/snabb"
+      patchelf --shrink-rpath $out/snabb
+      patchelf --set-rpath /lib/x86_64-linux-gnu $out/snabb
+      patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 $out/snabb
     '';
 
     doDist = true;
 
     distPhase = ''
-      cd "$out"
+      cd $out
       # $out will only contain the DISTNAME directory and the "snabb" binary.
       export DISTNAME=`ls -I snabb`
       tar Jcf $DISTNAME.tar.xz *
-      # Make tarball available through Hydra.
-      mkdir -p "$out/nix-support"
-      mv $DISTNAME.tar.xz "$out/nix-support"
+      # Make the tarball available for download through Hydra.
+      mkdir -p $out/nix-support
+      echo "file tarball $out/$DISTNAME.tar.xz" >> $out/nix-support/hydra-build-products
     '';
   };
 }
