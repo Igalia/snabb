@@ -43,8 +43,6 @@ in {
       cd "$out"
       # $out will only contain the DISTNAME directory and the "snabb" binary.
       export DISTNAME=`ls -I snabb`
-      # Remove a leftover stray binary. FIXME: should not happen.
-      rm "$DISTNAME/src/snabb"
       tar Jcf $DISTNAME.tar.xz *
       # Make tarball available through Hydra.
       mkdir -p "$out/nix-support"
