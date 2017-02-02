@@ -1,9 +1,10 @@
 # Run like this:
+#   nix-build ./tarball.nix
+# or
 #   nix-build --argstr hydraName snabb-lwaftr --arg hydraSrc \
-#     '{ uri = ./. ; gitTag = "1.0.0"; }' ./tarball.nix
-# and the release tarball will be written to ./result/nix-support .
-# It will contain both the sources and the executable, patched to run on
-# Linux LSB systems.
+#     '{ storePath = ./. ; gitTag = "1.0.0"; }' ./tarball.nix
+# and the release tarball will be written to ./result/ . It will contain
+# both the sources and the executable, patched to run on Linux LSB systems.
 #
 # FIXME: currently Hydra doesn't use the --tags parameter in the "git
 # describe" command, so lightweight (non-annotated) tags are not found.
@@ -12,7 +13,7 @@
 
 { nixpkgs ? <nixpkgs>
 , hydraName ? "snabb"
-, hydraSrc ? { uri = ./. ; gitTag = "1.0.0"; }
+, hydraSrc ? { storePath = ./. ; gitTag = "1.0.0"; }
 }:
 
 let
@@ -23,7 +24,7 @@ let
   # TODO: don't massage gitTag for now, re-evaluate later.
   # Possibly add policy to only generate the tarball when there's a new tag.
   name = "${hydraName}-${hydraSrc.gitTag}";
-  src = hydraSrc.uri;
+  src = hydraSrc.storePath;
 in {
   tarball = pkgs.stdenv.mkDerivation rec {
     inherit name src;
@@ -35,9 +36,9 @@ in {
       cp -a $sourceRoot/* $out/$name
     '';
 
-    # preBuild = ''
-    #   make clean
-    # '';
+    preBuild = ''
+      make clean
+    '';
 
     installPhase = ''
       mv src/snabb $out
