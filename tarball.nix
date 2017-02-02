@@ -1,8 +1,7 @@
 # Run like this:
 #   nix-build ./tarball.nix
 # or
-#   nix-build --argstr hydraName snabb-lwaftr --arg hydraSrc \
-#     '{ storePath = ./. ; gitTag = "1.0.0"; }' ./tarball.nix
+#   nix-build --argstr hydraName snabb-lwaftr --argstr version v1.0.0 ./tarball.nix
 # and the release tarball will be written to ./result/ . It will contain
 # both the sources and the executable, patched to run on Linux LSB systems.
 #
@@ -13,18 +12,24 @@
 
 { nixpkgs ? <nixpkgs>
 , hydraName ? "snabb"
-, hydraSrc ? { storePath = ./. ; gitTag = "1.0.0"; }
+, src ? ./.
+, version ? "dev"
 }:
 
 let
   pkgs = import nixpkgs {};
-  # Massage output of "git describe": "v3.1.7-7-g89747a1" -> "v3.1.7"
-  # version = (builtins.parseDrvName hydraSrc.gitTag).name;
-  # name = "${hydraName}-${version}";
-  # TODO: don't massage gitTag for now, re-evaluate later.
-  # Possibly add policy to only generate the tarball when there's a new tag.
-  name = "${hydraName}-${hydraSrc.gitTag}";
-  src = hydraSrc.storePath;
+  name = (src:
+    if builtins.isAttrs  src then
+      # Called from Hydra with "src" as "Git version", get the version from git tags.
+      # Massage output of "git describe": "v3.1.7-7-g89747a1" -> "v3.1.7"
+      # version = (builtins.parseDrvName src.gitTag).name;
+      # name = "${hydraName}-${version}";
+      # TODO: don't massage src.gitTag for now, re-evaluate later.
+      # Possibly add policy to only generate the tarball when there's a new tag.
+      "${hydraName}-${src.gitTag}"
+    else
+      # Called from the command line.
+      "${hydraName}-${version}") src;
 in {
   tarball = pkgs.stdenv.mkDerivation rec {
     inherit name src;
