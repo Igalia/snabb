@@ -1,26 +1,38 @@
 # Run like this:
-#   nix-build --argstr name snabb-lwaftr ./tarball.nix
+#   nix-build --argstr hydraName snabb-lwaftr --arg hydraSrc \
+#     '{ uri = ./. ; gitTag = "1.0.0"; }' ./tarball.nix
 # and the release tarball will be written to ./result/nix-support .
 # It will contain both the sources and the executable, patched to run on
 # Linux LSB systems.
+#
+# FIXME: currently Hydra doesn't use the --tags parameter in the "git
+# describe" command, so lightweight (non-annotated) tags are not found.
+# See https://github.com/NixOS/hydra/blob/master/src/lib/Hydra/Plugin/GitInput.pm#L148
+# Always need to use one of -a, -s or -u with the "git tag" command.
 
 { nixpkgs ? <nixpkgs>
-, name ? "snabb"
-, src ? ./.
+, hydraName ? "snabb"
+, hydraSrc ? { uri = ./. ; gitTag = "1.0.0"; }
 }:
 
 let
   pkgs = import nixpkgs {};
+  # Massage output of "git describe": "v3.1.7-7-g89747a1" -> "v3.1.7"
+  # version = (builtins.parseDrvName hydraSrc.gitTag).name;
+  # name = "${hydraName}-${version}";
+  # TODO: don't massage gitTag for now, re-evaluate later.
+  # Possibly add policy to only generate the tarball when there's a new tag.
+  name = "${hydraName}-${hydraSrc.gitTag}";
+  src = hydraSrc.uri;
 in {
   tarball = pkgs.stdenv.mkDerivation rec {
     inherit name src;
 
-    buildInputs = with pkgs; [ git makeWrapper patchelf ];
+    buildInputs = with pkgs; [ makeWrapper patchelf ];
 
     postUnpack = ''
-      export DISTNAME="$out/${name}-`cd snabb; git describe --tags | cut -d '-' -f 1`"
-      mkdir -p $DISTNAME
-      cp -a $sourceRoot/* $DISTNAME
+      mkdir -p $out/$name
+      cp -a $sourceRoot/* $out/$name
     '';
 
     # preBuild = ''
@@ -41,12 +53,10 @@ in {
 
     distPhase = ''
       cd $out
-      # $out will only contain the DISTNAME directory and the "snabb" binary.
-      export DISTNAME=`ls -I snabb`
-      tar Jcf $DISTNAME.tar.xz *
+      tar Jcf $name.tar.xz *
       # Make the tarball available for download through Hydra.
       mkdir -p $out/nix-support
-      echo "file tarball $out/$DISTNAME.tar.xz" >> $out/nix-support/hydra-build-products
+      echo "file tarball $out/$name.tar.xz" >> $out/nix-support/hydra-build-products
     '';
   };
 }
