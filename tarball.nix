@@ -5,10 +5,10 @@
 # and the release tarball will be written to ./result/ . It will contain
 # both the sources and the executable, patched to run on Linux LSB systems.
 #
-# FIXME: currently Hydra doesn't use the --tags parameter in the "git
-# describe" command, so lightweight (non-annotated) tags are not found.
-# See https://github.com/NixOS/hydra/blob/master/src/lib/Hydra/Plugin/GitInput.pm#L148
-# Always need to use one of -a, -s or -u with the "git tag" command.
+# NOTE: Hydra doesn't use the --tags parameter in the "git describe" command (see
+# https://github.com/NixOS/hydra/blob/master/src/lib/Hydra/Plugin/GitInput.pm#L148
+# ), so lightweight (non-annotated) tags are not found. Always create annotated
+# tags with the "git tag" command by using one of the -a, -s or -u options.
 
 { nixpkgs ? <nixpkgs>
 , hydraName ? "snabb"
@@ -21,14 +21,12 @@ let
   name = (src:
     if builtins.isAttrs  src then
       # Called from Hydra with "src" as "Git version", get the version from git tags.
-      # Massage output of "git describe": "v3.1.7-7-g89747a1" -> "v3.1.7"
-      # version = (builtins.parseDrvName src.gitTag).name;
-      # name = "${hydraName}-${version}";
-      # TODO: don't massage src.gitTag for now, re-evaluate later.
-      # Possibly add policy to only generate the tarball when there's a new tag.
+      # If the last commit is the tag's one, you'll just get the tag name: "v3.1.7";
+      # otherwise you'll also get the number of commits since the last tag, and the
+      # shortened commit checksum: "v3.1.7-7-g89747a1".
       "${hydraName}-${src.gitTag}"
     else
-      # Called from the command line.
+      # Called from the command line, the user supplies the version.
       "${hydraName}-${version}") src;
 in {
   tarball = pkgs.stdenv.mkDerivation rec {
