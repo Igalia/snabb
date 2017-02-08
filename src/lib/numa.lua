@@ -14,11 +14,12 @@ local pci = require("lib.hardware.pci")
 local bound_cpu
 local bound_numa_node
 
+local node_path = '/sys/devices/system/node/node'
+
 function cpu_get_numa_node (cpu)
    local node = 0
    while true do
-      local node_dir = S.open('/sys/devices/system/node/node'..node,
-                              'rdonly, directory')
+      local node_dir = S.open(node_path..node, 'rdonly, directory')
       if not node_dir then return end
       local found = S.readlinkat(node_dir, 'cpu'..cpu)
       node_dir:close()
@@ -28,10 +29,22 @@ function cpu_get_numa_node (cpu)
 end
 
 function has_numa ()
-   local node1 = S.open('/sys/devices/system/node/node1', 'rdonly, directory')
+   local node1 = S.open(node_path..tostring(1), 'rdonly, directory')
    if not node1 then return false end
    node1:close()
    return true
+end
+
+-- Return the first and last CPU ids (as numbers) on the given NUMA node.
+function get_cpus_per_numa_node (node)
+   local cpulist_file = io.open(node_path..node..'/cpulist')
+   -- cpulist contains something like '0-3' or '6-11'.
+   local next, cpulist = cpulist_file:read():split('-')
+   if not cpulist then return nil, nil end
+   local first, last = next(cpulist), next(cpulist)
+   -- Check for single core CPU.
+   if not last then return tonumber(first), nil end
+   return tonumber(first), tonumber(last)
 end
 
 function pci_get_numa_node (addr)
@@ -126,18 +139,34 @@ function prevent_preemption(priority)
 end
 
 function selftest ()
+
+   function test_cpu(cpu, node)
+      bind_to_cpu(cpu)
+      assert(bound_cpu == cpu)
+      assert(bound_numa_node == node)
+      assert(S.getcpu().cpu == cpu)
+      assert(S.getcpu().node == node)
+      bind_to_cpu(nil)
+      assert(bound_cpu == nil)
+      assert(bound_numa_node == node)
+      assert(S.getcpu().node == node)
+      bind_to_numa_node(nil)
+      assert(bound_cpu == nil)
+      assert(bound_numa_node == nil)
+   end
+
+   function test_numa_node(node)
+      local first, last = get_cpus_per_numa_node(node)
+      test_cpu(first, node)
+      if last then
+         test_cpu(last, node)
+      end
+   end
+
    print('selftest: numa')
-   bind_to_cpu(0)
-   assert(bound_cpu == 0)
-   assert(bound_numa_node == 0)
-   assert(S.getcpu().cpu == 0)
-   assert(S.getcpu().node == 0)
-   bind_to_cpu(nil)
-   assert(bound_cpu == nil)
-   assert(bound_numa_node == 0)
-   assert(S.getcpu().node == 0)
-   bind_to_numa_node(nil)
-   assert(bound_cpu == nil)
-   assert(bound_numa_node == nil)
+   test_numa_node(0)
+   if has_numa() then
+      test_numa_node(1)
+   end
    print('selftest: numa: ok')
 end
