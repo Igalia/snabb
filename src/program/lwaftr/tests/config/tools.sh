@@ -18,17 +18,17 @@ function random_name {
 #  $ assert_equal "banana" "banana"   -> nothing (valid)
 function assert_equal {
     if [[ -z "$2" ]]; then
-	produce_error "assert_equals: Not enough arguments."
-	exit 1
+        produce_error "assert_equals: Not enough arguments."
+        exit 1
     fi
     if [[ "$1" == "$2" ]]; then
-	return
+        return
     else
-	if [[ "$3" == "" ]]; then
-	    produce_error "Assert error: $1 != $2"
-	else
-	    produce_error "Assert error: $3"
-	fi
+        if [[ "$3" == "" ]]; then
+            produce_error "Assert error: $1 != $2"
+        else
+            produce_error "Assert error: $3"
+        fi
     fi
 }
 
@@ -37,7 +37,7 @@ function assert_equal {
 # duration is set to prevent it running indefinitely.
 function start_lwaftr_bench {
     ./snabb lwaftr bench --reconfigurable --bench-file /dev/null --name "$1" \
-	                 --duration 30 \
+                         --duration 30 \
                          program/lwaftr/tests/data/icmp_on_fail.conf \
                          program/lwaftr/tests/benchdata/ipv{4,6}-0550.pcap &> /dev/null &
 

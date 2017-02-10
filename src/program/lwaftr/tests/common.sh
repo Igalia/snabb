@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# Show the error message and exit with code 1.
+function exit_on_error {
+    (>&2 echo $1)
+    exit 1
+}
+
+# Check that the script is run as root, otherwise exit.
+function check_for_root {
+    if [[ $EUID != 0 ]]; then
+        exit_on_error "This script must be run as root"
+    fi
+}
+
+# Check equality of the first two arguments.
+# The third argument will be displayed if the check fails.
+# e.g.
+#  $ assert_equal "yellow "cat"                   -> error
+#  $ assert_equal "yellow "cat" "Cat not yellow"  -> error with message
+#  $ assert_equal "banana" "banana"               -> nothing (valid)
+function assert_equal {
+    if [[ -z "$2" ]]; then
+        exit_on_error "assert_equal: not enough arguments."
+        exit 1
+    fi
+    if [[ "$1" == "$2" ]]; then
+        return
+    else
+        if [[ "$3" == "" ]]; then
+            exit_on_error "Assert error: $1 != $2"
+        else
+            exit_on_error "Assert error: $3"
+        fi
+    fi
+}
