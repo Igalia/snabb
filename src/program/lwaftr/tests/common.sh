@@ -13,6 +13,17 @@ function check_for_root {
     fi
 }
 
+# Check that a file exists, otherwise exit.
+# If the second argument is "--remove", remove the file.
+function assert_file_exists {
+    if [[ ! -f "$1" ]]; then
+        exit_on_error "File $1 does not exists."
+    fi
+    if [[ "$2" == "--remove" ]]; then
+        rm -f "$1"
+    fi
+}
+
 # Check equality of the first two arguments.
 # The third argument will be displayed if the check fails.
 # e.g.
@@ -27,10 +38,10 @@ function assert_equal {
     if [[ "$1" == "$2" ]]; then
         return
     else
-        if [[ "$3" == "" ]]; then
-            exit_on_error "Assert error: $1 != $2"
+        if [[ -z "$3" ]]; then
+            exit_on_error "Error: $1 != $2"
         else
-            exit_on_error "Assert error: $3"
+            exit_on_error "Error: $3"
         fi
     fi
 }
