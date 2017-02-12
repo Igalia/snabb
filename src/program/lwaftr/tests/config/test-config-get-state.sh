@@ -23,12 +23,12 @@ start_lwaftr_bench $SNABB_NAME
 # Select a few at random which should have non-zero results.
 IN_IPV4="`./snabb config get-state $SNABB_NAME /softwire-state/in-ipv4-bytes`"
 if [[ "$IN_IPV4" == "0" ]]; then
-	produce_error "Counter should not show zero."
+    exit_on_error "Counter should not show zero."
 fi
 
 OUT_IPV4="`./snabb config get-state $SNABB_NAME /softwire-state/out-ipv4-bytes`"
 if [[ "$IN_IPV4" == "0" ]]; then
-	produce_error "Counter should not show zero."
+    exit_on_error "Counter should not show zero."
 fi
 
 ./snabb config get-state "$SNABB_NAME" / > /dev/null

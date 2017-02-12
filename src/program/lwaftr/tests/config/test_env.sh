@@ -13,7 +13,7 @@ BENCHDATA_DIR="${TEST_DIR}/benchdata"
 # a duration is set to prevent it running indefinitely.
 function start_lwaftr_bench {
     ./snabb lwaftr bench --reconfigurable --bench-file /dev/null --name "$1" \
-	                       --duration 30 \
+                         --duration 30 \
                          program/lwaftr/tests/data/icmp_on_fail.conf \
                          program/lwaftr/tests/benchdata/ipv{4,6}-0550.pcap &> /dev/null &
 
