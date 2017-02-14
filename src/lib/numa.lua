@@ -15,6 +15,7 @@ local bound_cpu
 local bound_numa_node
 
 local node_path = '/sys/devices/system/node/node'
+local MAX_CPU = 1023
 
 function cpu_get_numa_node (cpu)
    local node = 0
@@ -33,18 +34,6 @@ function has_numa ()
    if not node1 then return false end
    node1:close()
    return true
-end
-
--- Return the first and last CPU ids (as numbers) on the given NUMA node.
-function get_cpus_per_numa_node (node)
-   local cpulist_file = io.open(node_path..node..'/cpulist')
-   -- cpulist contains something like '0-3' or '6-11'.
-   local next, cpulist = cpulist_file:read():split('-')
-   if not cpulist then return nil, nil end
-   local first, last = next(cpulist), next(cpulist)
-   -- Check for single core CPU.
-   if not last then return tonumber(first), nil end
-   return tonumber(first), tonumber(last)
 end
 
 function pci_get_numa_node (addr)
@@ -95,7 +84,7 @@ end
 function unbind_cpu ()
    local cpu_set = S.sched_getaffinity()
    cpu_set:zero()
-   for i = 0, 1023 do cpu_set:set(i) end
+   for i = 0, MAX_CPU do cpu_set:set(i) end
    assert(S.sched_setaffinity(0, cpu_set))
    bound_cpu = nil
 end
@@ -140,7 +129,8 @@ end
 
 function selftest ()
 
-   function test_cpu(cpu, node)
+   function test_cpu(cpu)
+      local node = cpu_get_numa_node(cpu)
       bind_to_cpu(cpu)
       assert(bound_cpu == cpu)
       assert(bound_numa_node == node)
@@ -155,18 +145,12 @@ function selftest ()
       assert(bound_numa_node == nil)
    end
 
-   function test_numa_node(node)
-      local first, last = get_cpus_per_numa_node(node)
-      test_cpu(first, node)
-      if last then
-         test_cpu(last, node)
-      end
-   end
-
    print('selftest: numa')
-   test_numa_node(0)
-   if has_numa() then
-      test_numa_node(1)
+   local cpu_set = S.sched_getaffinity()
+   for cpuid = 0, MAX_CPU do
+      if cpu_set:get(cpuid) then
+         test_cpu(cpuid)
+      end
    end
    print('selftest: numa: ok')
 end
