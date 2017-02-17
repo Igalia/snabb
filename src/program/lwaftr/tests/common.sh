@@ -20,7 +20,7 @@ fi
 # If one of the commands from $2 onward is not available, exit
 # with code $SKIPPED_CODE mentioning the test name passed in $1.
 function check_commands_available {
-    test_name=$1
+    local test_name=$1
     shift
     for cmd in $@; do
         which $cmd &> /dev/null
@@ -77,7 +77,7 @@ function assert_equal {
 # First parameter: the command as one string;
 # second parameter: the log file name.
 function tmux_launch {
-    command="$1 2>&1 | tee $2"
+    local command="$1 2>&1 | tee $2"
     if [ -z "$tmux_session" ]; then
         tmux_session=test_env-$$
         tmux new-session -d -n "lwaftr" -s $tmux_session "$command"
