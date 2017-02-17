@@ -22,7 +22,7 @@ LWAFTR_CONF=${TEST_DIR}/data/no_icmp.conf
 # Launch "lwaftr run".
 CMD_LINE="./snabb lwaftr run --name $LWAFTR_NAME --conf $LWAFTR_CONF"
 CMD_LINE+=" --v4 $SNABB_PCI0 --v6 $SNABB_PCI1"
-tmux_launch $CMD_LINE "lwaftr.log"
+tmux_launch "$CMD_LINE" "lwaftr.log"
 sleep 2
 
 # Test query all.

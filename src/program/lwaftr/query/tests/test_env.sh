@@ -7,7 +7,8 @@ TEST_OUTPUT_FNAME=$(mktemp)
 
 # Terminate the "lwaftr run" command, remove the output file, and exit.
 function query_cleanup {
-    ps aux | grep "lwaftr run" | awk '{print $2}' | xargs kill 2> /dev/null
+    ps aux | grep $SNABB_PCI0 | grep -v "grep" | awk '{print $2}' | xargs kill 2> /dev/null
+    ps aux | grep "snabb lwaftr query" | grep -v "grep" | awk '{print $2}' | xargs kill 2> /dev/null
     rm -f $TEST_OUTPUT_FNAME
     exit
 }
@@ -50,6 +51,7 @@ function test_lwaftr_query {
     if [[ $lineno -gt 1 ]]; then
         echo "Success: lwaftr query $*"
     else
+        cat $TEST_OUTPUT_FNAME
         exit_on_error "Error: lwaftr query $*"
     fi
 }
@@ -58,8 +60,9 @@ function test_lwaftr_query_no_counters {
     ./snabb lwaftr query $@ > $TEST_OUTPUT_FNAME
     local lineno=`cat $TEST_OUTPUT_FNAME | wc -l`
     if [[ $lineno -eq 1 ]]; then
-        echo "Success: lwaftr query $*"
+        echo "Success: lwaftr query no counters $*"
     else
-        exit_on_error "Error: lwaftr query $*"
+        cat $TEST_OUTPUT_FNAME
+        exit_on_error "Error: lwaftr query no counters $*"
     fi
 }
