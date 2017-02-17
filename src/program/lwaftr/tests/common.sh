@@ -13,18 +13,18 @@ function exit_on_error {
 }
 
 # Check that the script is run as root, otherwise exit.
-function check_for_root {
-    if [[ $EUID != 0 ]]; then
-        exit_on_error "This script must be run as root"
-    fi
-}
+if [[ $EUID != 0 ]]; then
+    exit_on_error "Tests must be run as root, exiting."
+fi
 
 # Check that a command is available, otherwise exit with code $SKIPPED_CODE.
 function check_command_available {
-    which "$1" &> /dev/null
-    if [[ $? -ne 0 ]]; then
-       exit_on_error "No $1 tool present, unable to run test." $SKIPPED_CODE
-    fi
+    for cmd in $@; do
+        which $cmd &> /dev/null
+        if [[ $? -ne 0 ]]; then
+           exit_on_error "The $cmd command is not present, unable to run test." $SKIPPED_CODE
+        fi
+    done
 }
 
 # Check that NIC interfaces are available, otherwise exit with code $SKIPPED_CODE.
@@ -67,5 +67,18 @@ function assert_equal {
         else
             exit_on_error "Error: $3"
         fi
+    fi
+}
+
+# Launch a command in a new window of an existing session, or in a new session.
+# First parameter: the command as one string;
+# second parameter: the log file name.
+function tmux_launch {
+    command="$1 2>&1 | tee $2"
+    if [ -z "$tmux_session" ]; then
+        tmux_session=test_env-$$
+        tmux new-session -d -n "lwaftr" -s $tmux_session "$command"
+    else
+        tmux new-window -a -d -n "lwaftr" -t $tmux_session "$command"
     fi
 }
