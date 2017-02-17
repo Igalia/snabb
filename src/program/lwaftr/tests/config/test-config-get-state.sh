@@ -3,6 +3,8 @@
 ## that it will run and produce values. The script has no way of
 ## validating the accuracy of the values, but it'll check it works.
 
+TEST_NAME="config get state"
+
 # TEST_DIR is set by the caller, and passed onward.
 export TEST_DIR
 source ${TEST_DIR}/common.sh || exit $?
@@ -10,7 +12,7 @@ source ${TEST_DIR}/common.sh || exit $?
 # CONFIG_TEST_DIR is also set by the caller.
 source ${CONFIG_TEST_DIR}/test_env.sh || exit $?
 
-echo "Testing config get state"
+echo "Testing ${TEST_NAME}"
 
 # Come up with a name for the lwaftr.
 SNABB_NAME=lwaftr-$$

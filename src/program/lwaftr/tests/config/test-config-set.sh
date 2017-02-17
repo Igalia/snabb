@@ -2,15 +2,16 @@
 ## This checks you can set values, it'll then perform a get to
 ## verify the value set is the value that is got too.
 
+TEST_NAME="config set"
+
 # TEST_DIR is set by the caller, and passed onward.
 export TEST_DIR
 source ${TEST_DIR}/common.sh || exit $?
 
-
 # CONFIG_TEST_DIR is also set by the caller.
 source ${CONFIG_TEST_DIR}/test_env.sh || exit $?
 
-echo "Testing config set"
+echo "Testing ${TEST_NAME}"
 
 # Come up with a name for the lwaftr.
 SNABB_NAME=lwaftr-$$

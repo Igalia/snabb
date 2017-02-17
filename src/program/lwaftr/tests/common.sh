@@ -4,8 +4,8 @@ SKIPPED_CODE=43
 
 # Show $1 as error message and exit with code $2, or 1 if not passed.
 function exit_on_error {
-    (>&2 echo $1)
-    if [[ -n "$2" ]]; then
+    (>&2 echo "$1")
+    if [[ -n $2 ]]; then
         exit $2
     else
         exit 1
@@ -17,12 +17,15 @@ if [[ $EUID != 0 ]]; then
     exit_on_error "Tests must be run as root, exiting."
 fi
 
-# Check that a command is available, otherwise exit with code $SKIPPED_CODE.
-function check_command_available {
+# If one of the commands from $2 onward is not available, exit
+# with code $SKIPPED_CODE mentioning the test name passed in $1.
+function check_commands_available {
+    test_name=$1
+    shift
     for cmd in $@; do
         which $cmd &> /dev/null
         if [[ $? -ne 0 ]]; then
-           exit_on_error "The $cmd command is not present, unable to run test." $SKIPPED_CODE
+           exit_on_error "Cannot find $cmd, skipping $test_name" $SKIPPED_CODE
         fi
     done
 }

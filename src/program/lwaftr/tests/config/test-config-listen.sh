@@ -3,6 +3,8 @@
 ## It only tests the socket method of communicating with the listen
 ## command due to the difficulties of testing interactive scripts.
 
+TEST_NAME="config listen"
+
 # TEST_DIR is set by the caller, and passed onward.
 export TEST_DIR
 source ${TEST_DIR}/common.sh || exit $?
@@ -10,12 +12,12 @@ source ${TEST_DIR}/common.sh || exit $?
 # Verify we have the "nc" tool, used to communicate with sockets,
 # and the "python" interpreter available.
 # If we don't have them, we just have to skip this test.
-check_command_available nc python
+check_commands_available "$TEST_NAME" nc python
 
 # CONFIG_TEST_DIR is also set by the caller.
 source ${CONFIG_TEST_DIR}/test_env.sh || exit $?
 
-echo "Testing config listen"
+echo "Testing ${TEST_NAME}"
 
 # Come up with a name for the lwaftr.
 SNABB_NAME=lwaftr-$$

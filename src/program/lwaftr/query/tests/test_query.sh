@@ -6,8 +6,8 @@ TEST_NAME="lwaftr query"
 export TEST_DIR
 source ${TEST_DIR}/common.sh || exit $?
 
-check_nics_available $TEST_NAME
-check_command_available tmux
+check_nics_available "$TEST_NAME"
+check_commands_available "$TEST_NAME" tmux
 
 # QUERY_TEST_DIR is also set by the caller.
 source ${QUERY_TEST_DIR}/test_env.sh || exit $?
