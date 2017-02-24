@@ -10,7 +10,7 @@ export TESTS_DIR=`dirname "$0"`
 # Show values of local variables when there are errors.
 # List all executed tests, don't show just dots.
 python3 -m unittest discover \
-    export --start-directory "${TESTS_DIR}" \
+    --start-directory "${TESTS_DIR}" \
     --pattern "*_test.py" \
     --locals \
     --verbose
