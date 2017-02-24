@@ -24,7 +24,7 @@ BENCHMARK_PATH = TESTS_DIR / BENCHMARK_FILENAME
 
 class TestBenchSubcommand(unittest.TestCase):
 
-    test_args = (
+    cmd_args = (
         SNABB_CMD, 'lwaftr', 'bench',
         '--duration', '0.1',
         '--bench-file', BENCHMARK_FILENAME,
@@ -33,20 +33,20 @@ class TestBenchSubcommand(unittest.TestCase):
         BENCHDATA_DIR / 'ipv6-0550.pcap',
     )
 
-    def run_bench_test(self, args):
-        output = sh.sudo(*args)
+    def run_bench_test(self, cmd_args):
+        output = sh.sudo(*cmd_args)
         self.assertEqual(output.exit_code, 0)
         self.assertTrue(BENCHMARK_PATH.is_file(),
             'Cannot find {}'.format(BENCHMARK_FILENAME))
         BENCHMARK_PATH.unlink()
 
     def test_standard(self):
-        self.run_bench_test(self.test_args)
+        self.run_bench_test(self.cmd_args)
 
     def test_reconfigurable(self):
-        reconf_args = list(self.test_args)
-        reconf_args.insert(3, '--reconfigurable')
-        self.run_bench_test(reconf_args)
+        reconf_cmd_args = list(self.cmd_args)
+        reconf_cmd_args.insert(3, '--reconfigurable')
+        self.run_bench_test(reconf_cmd_args)
 
 
 if __name__ == '__main__':
