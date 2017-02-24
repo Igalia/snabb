@@ -26,7 +26,7 @@ class TestBenchSubcommand(unittest.TestCase):
 
     cmd_args = (
         SNABB_CMD, 'lwaftr', 'bench',
-        '--duration', '0.1',
+        '--duration', '0.5',
         '--bench-file', BENCHMARK_FILENAME,
         DATA_DIR / 'icmp_on_fail.conf',
         BENCHDATA_DIR / 'ipv4-0550.pcap',
