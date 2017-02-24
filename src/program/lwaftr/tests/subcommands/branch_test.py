@@ -19,14 +19,15 @@ DATA_DIR = TESTS_DIR / 'data'
 BENCHDATA_DIR = TESTS_DIR / 'benchdata'
 SNABB_CMD = TESTS_DIR.parents[2] / 'snabb'
 BENCHMARK_FILENAME = 'benchtest.csv'
-BENCHMARK_PATH = TESTS_DIR / BENCHMARK_FILENAME
+# Snabb creates the benchmark file in the current directory
+BENCHMARK_PATH = Path.cwd() / BENCHMARK_FILENAME
 
 
 class TestBenchSubcommand(unittest.TestCase):
 
     cmd_args = (
         SNABB_CMD, 'lwaftr', 'bench',
-        '--duration', '0.5',
+        '--duration', '0.1',
         '--bench-file', BENCHMARK_FILENAME,
         DATA_DIR / 'icmp_on_fail.conf',
         BENCHDATA_DIR / 'ipv4-0550.pcap',
@@ -37,7 +38,7 @@ class TestBenchSubcommand(unittest.TestCase):
         output = sh.sudo(*cmd_args)
         self.assertEqual(output.exit_code, 0)
         self.assertTrue(BENCHMARK_PATH.is_file(),
-            'Cannot find {}'.format(BENCHMARK_FILENAME))
+            'Cannot find {}'.format(BENCHMARK_PATH))
         BENCHMARK_PATH.unlink()
 
     def test_standard(self):
