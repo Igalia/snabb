@@ -32,6 +32,8 @@ local valuelib = require("lib.yang.value")
 local util = require("lib.yang.util")
 local normalize_id = datalib.normalize_id
 
+local errq = util.err_and_quit
+
 local function table_keys(t)
    local ret = {}
    for k, v in pairs(t) do table.insert(ret, k) end
@@ -213,14 +215,14 @@ function resolver(grammar, path_string)
    local function compute_getter(grammar, name, query, getter)
       local child_grammar = grammar.members[name]
       if not child_grammar then
-         error("Struct has no field named '"..name.."'.")
+         errq("Struct has no field named '"..name.."'.")
       end
       local id = normalize_id(name)
       local function child_getter(data)
          local struct = getter(data)
          local child = struct[id]
          if child == nil then
-            error("Struct instance has no field named '"..name.."'.")
+            errq("Struct instance has no field named '"..name.."'.")
          end
          return child
       end

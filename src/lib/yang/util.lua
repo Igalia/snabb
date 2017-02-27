@@ -128,6 +128,12 @@ function memoize(f, max_occupancy)
    end
 end
 
+function err_and_quit(msg)
+   io.stderr:write(msg .. '\n')
+   io.stderr:flush()
+   os.exit(1)
+end
+
 function selftest()
    print('selftest: lib.yang.util')
    assert(tointeger('0') == 0)
