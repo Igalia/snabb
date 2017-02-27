@@ -26,7 +26,7 @@ class TestRun(unittest.TestCase):
     def execute_run_test(self, cmd_args):
         output = sh.sudo(*cmd_args)
         self.assertEqual(output.exit_code, 0)
-        self.assert_(len(output.splitlines()) > 1)
+        self.assertTrue(len(output.splitlines()) > 1)
 
     def test_run_standard(self):
         self.execute_run_test(self.cmd_args)
