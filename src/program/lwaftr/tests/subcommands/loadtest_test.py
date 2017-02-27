@@ -33,16 +33,19 @@ class TestLoadtest(unittest.TestCase):
         BENCHDATA_DIR / 'ipv6-0550.pcap', 'IPv6', 'IPv4', SNABB_PCI1,
     )
 
-    def setUpClass(self):
-        self.run_cmd = sh.sudo(*self.run_cmd_args, _bg=True)
+    # Use setUpClass to only setup the "run" daemon once for all tests.
+    @classmethod
+    def setUpClass(cls):
+        cls.run_cmd = sh.sudo(*cls.run_cmd_args, _bg=True)
 
     def test_loadtest(self):
         output = sh.sudo(*self.loadtest_cmd_args)
         self.assertEqual(output.exit_code, 0)
         self.assert_(len(output.splitlines()) > 10)
 
-    def tearDownClass(self):
-        self.run_cmd.terminate()
+    @classmethod
+    def tearDownClass(cls):
+        cls.run_cmd.terminate()
 
 
 if __name__ == '__main__':
