@@ -22,9 +22,7 @@ class TestLoadtest(unittest.TestCase):
         SNABB_CMD, 'lwaftr', 'run',
         '--bench-file', '/dev/null',
         '--conf', DATA_DIR / 'icmp_on_fail.conf',
-        # NUMA node #0.
-        '--cpu', '4',
-        '--on-a-stick', SNABB_PCI1,
+        '--on-a-stick', SNABB_PCI0,
     )
 
     loadtest_cmd_args = (
@@ -35,10 +33,8 @@ class TestLoadtest(unittest.TestCase):
         '--step', '0.1e8',
         '--duration', '0.1',
         '--bitrate', '0.2e8',
-        # NUMA node #1.
-        '--cpu', '10',
         # Just one card for on-a-stick mode.
-        BENCHDATA_DIR / 'ipv4_and_ipv6_stick_imix.pcap', 'ALL', 'ALL', SNABB_PCI0,
+        BENCHDATA_DIR / 'ipv4_and_ipv6_stick_imix.pcap', 'ALL', 'ALL', SNABB_PCI1,
     )
 
     # Use setUpClass to only setup the "run" daemon once for all tests.
@@ -49,7 +45,7 @@ class TestLoadtest(unittest.TestCase):
     def test_loadtest(self):
         output = sh.sudo(*self.loadtest_cmd_args)
         self.assertEqual(output.exit_code, 0)
-        self.assert_(len(output.splitlines()) > 10)
+        self.assertTrue(len(output.splitlines()) > 10)
 
     @classmethod
     def tearDownClass(cls):
