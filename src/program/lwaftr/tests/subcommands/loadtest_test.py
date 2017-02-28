@@ -1,5 +1,9 @@
 """
 Test the "snabb lwaftr loadtest" subcommand. Needs NIC names.
+
+Since there are only two NIC names available in snabb-bot, and we need to
+execute two programs networked to each other ("run" and "loadtest"), they
+are set to on-a-stick mode, so that they use one NIC each instead of two.
 """
 
 import unittest
@@ -18,19 +22,23 @@ class TestLoadtest(unittest.TestCase):
         SNABB_CMD, 'lwaftr', 'run',
         '--bench-file', '/dev/null',
         '--conf', DATA_DIR / 'icmp_on_fail.conf',
-        '--v4', SNABB_PCI0,
-        '--v6', SNABB_PCI1,
+        # NUMA node #0.
+        '--cpu', '4',
+        '--on-a-stick', SNABB_PCI1,
     )
 
     loadtest_cmd_args = (
         SNABB_CMD, 'lwaftr', 'loadtest',
         '--bench-file', '/dev/null',
+        # Something quick and easy.
         '--program', 'ramp_up',
         '--step', '0.1e8',
         '--duration', '0.1',
         '--bitrate', '0.2e8',
-        BENCHDATA_DIR / 'ipv4-0550.pcap', 'IPv4', 'IPv6', SNABB_PCI0,
-        BENCHDATA_DIR / 'ipv6-0550.pcap', 'IPv6', 'IPv4', SNABB_PCI1,
+        # NUMA node #1.
+        '--cpu', '10',
+        # Just one card for on-a-stick mode.
+        BENCHDATA_DIR / 'ipv4_and_ipv6_stick_imix.pcap', 'ALL', 'ALL', SNABB_PCI0,
     )
 
     # Use setUpClass to only setup the "run" daemon once for all tests.
