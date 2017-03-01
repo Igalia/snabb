@@ -5,6 +5,8 @@ Environment support code for tests.
 import os
 from pathlib import Path
 
+from lib import sh
+
 
 # Commands run under "sudo" run as root. The root's user PATH should not
 # include "." (the current directory) for security reasons. If this is the
@@ -23,3 +25,10 @@ BENCHMARK_PATH = Path.cwd() / BENCHMARK_FILENAME
 
 def nic_names():
     return os.environ.get('SNABB_PCI0'), os.environ.get('SNABB_PCI1')
+
+
+def tap0_available():
+    output = sh.ip('tuntap', 'list')
+    if output.exit_code != 0:
+        return False
+    return 'tap0' in output
