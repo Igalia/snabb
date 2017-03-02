@@ -27,8 +27,13 @@ def nic_names():
     return os.environ.get('SNABB_PCI0'), os.environ.get('SNABB_PCI1')
 
 
-def tap0_available():
+def tap_name():
+    """
+    Return the first TAP interface name if one found: (tap_iface, None).
+    Return (None, 'No TAP interface available') if none found.
+    """
     output = sh.ip('tuntap', 'list')
-    if output.exit_code != 0:
-        return False
-    return 'tap0' in output
+    tap_iface = output.split(':')[0]
+    if not tap_iface:
+        return None, 'No TAP interface available'
+    return tap_iface, None

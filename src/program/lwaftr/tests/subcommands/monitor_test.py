@@ -8,14 +8,15 @@ Test the "snabb lwaftr monitor" subcommand. Needs a NIC name and a TAP interface
 import unittest
 
 from lib import sh
-from lib.test_env import DATA_DIR, SNABB_CMD, nic_names, tap0_available
+from lib.test_env import DATA_DIR, SNABB_CMD, nic_names, tap_name
 
 
 SNABB_PCI0 = nic_names()[0]
+TAP_IFACE, tap_err_msg = tap_name()
 
 
 @unittest.skipUnless(SNABB_PCI0, 'NIC not configured')
-@unittest.skipUnless(tap0_available(), 'tap0 not available')
+@unittest.skipUnless(TAP_IFACE, tap_err_msg)
 class TestMonitor(unittest.TestCase):
 
     run_cmd_args = (
@@ -24,7 +25,7 @@ class TestMonitor(unittest.TestCase):
         '--bench-file', '/dev/null',
         '--conf', DATA_DIR / 'icmp_on_fail.conf',
         '--on-a-stick', SNABB_PCI0,
-        '--mirror', 'tap0',
+        '--mirror', TAP_IFACE,
     )
 
     monitor_cmd_args = (
