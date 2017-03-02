@@ -49,7 +49,7 @@ class TestLoadtest(unittest.TestCase):
         Needed to see the daemon's stdout and stderr if it fails.
         The _done attribute is not working well.
         """
-        print('\nRun command:', line)
+        print('Run command:', line)
 
     def test_loadtest(self):
         output = sh.sudo(*self.loadtest_cmd_args)
@@ -57,12 +57,11 @@ class TestLoadtest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if cls.run_cmd.process.is_alive():
-            try:
-                cls.run_cmd.terminate()
-            except ProcessLookupError:
-                # It was already gone.
-                pass
+        try:
+            cls.run_cmd.terminate()
+        except ProcessLookupError:
+            # It was already gone.
+            pass
 
 
 if __name__ == '__main__':
