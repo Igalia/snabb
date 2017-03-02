@@ -20,7 +20,7 @@ class TestCheck(unittest.TestCase):
 
     def execute_check_test(self, cmd_args):
         output = sh.sudo(*cmd_args)
-        self.assertEqual(output.exit_code, 0)
+        # An exception is raised by sh if the exit_code is not zero.
 
     def test_check_standard(self):
         self.execute_check_test(self.cmd_args)

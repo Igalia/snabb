@@ -40,16 +40,29 @@ class TestLoadtest(unittest.TestCase):
     # Use setUpClass to only setup the "run" daemon once for all tests.
     @classmethod
     def setUpClass(cls):
-        cls.run_cmd = sh.sudo(*cls.run_cmd_args, _bg=True)
+        cls.run_cmd = sh.sudo(*cls.run_cmd_args,
+            _bg=True, _err_to_out=True, _out=cls.run_cmd_out, _tty_out=False)
+
+    @classmethod
+    def run_cmd_out(cls, line):
+        """
+        Needed to see the daemon's stdout and stderr if it fails.
+        The _done attribute is not working well.
+        """
+        print('\nRun command:', line)
 
     def test_loadtest(self):
         output = sh.sudo(*self.loadtest_cmd_args)
-        self.assertEqual(output.exit_code, 0)
         self.assertTrue(len(output.splitlines()) > 10)
 
     @classmethod
     def tearDownClass(cls):
-        cls.run_cmd.terminate()
+        if cls.run_cmd.process.is_alive():
+            try:
+                cls.run_cmd.terminate()
+            except ProcessLookupError:
+                # It was already gone.
+                pass
 
 
 if __name__ == '__main__':

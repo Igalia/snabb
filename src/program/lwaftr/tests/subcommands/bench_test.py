@@ -22,7 +22,6 @@ class TestBench(unittest.TestCase):
 
     def execute_bench_test(self, cmd_args):
         output = sh.sudo(*cmd_args)
-        self.assertEqual(output.exit_code, 0)
         self.assertTrue(BENCHMARK_PATH.is_file(),
             'Cannot find {}'.format(BENCHMARK_PATH))
         BENCHMARK_PATH.unlink()
