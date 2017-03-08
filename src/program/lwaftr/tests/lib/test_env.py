@@ -4,8 +4,10 @@ Environment support code for tests.
 
 import os
 from pathlib import Path
-
-from lib import sh
+from signal import SIGTERM
+from subprocess import PIPE, Popen, check_output
+import time
+import unittest
 
 
 # Commands run under "sudo" run as root. The root's user PATH should not
@@ -32,8 +34,51 @@ def tap_name():
     Return the first TAP interface name if one found: (tap_iface, None).
     Return (None, 'No TAP interface available') if none found.
     """
-    output = sh.ip('tuntap', 'list')
+    output = check_output(['ip', 'tuntap', 'list'])
     tap_iface = output.split(':')[0]
     if not tap_iface:
         return None, 'No TAP interface available'
     return tap_iface, None
+
+
+class DaemonBasedTest(unittest.TestCase):
+    """
+    Base class for TestCases needing a "snabb lwaftr" daemon, running a
+    subcommand like "run" or "bench".
+
+    Provide the daemon args in "self.daemon_args".
+    Set "self.wait_for_daemon_startup" to True if it needs time to start up.
+    """
+
+    # Override these.
+    daemon_args = (str(SNABB_CMD), 'lwaftr', '--help')
+    wait_for_daemon_startup = False
+
+    # Use setUpClass to only setup the daemon once for all tests.
+    @classmethod
+    def setUpClass(cls):
+        cls.daemon = Popen(cls.daemon_args, stdout=PIPE, stderr=PIPE)
+        if cls.wait_for_daemon_startup:
+            time.sleep(1)
+
+    def run_cmd(self, args):
+        proc = Popen(args, stdout=PIPE, stderr=PIPE)
+        output, errput = proc.communicate()
+        if proc.returncode != 0:
+            msg = '\n'.join(('Error running command:', str(args),
+                'Exit code:', str(proc.returncode),
+                'STDOUT', str(output), 'STDERR', str(errput)))
+            self.fail(msg)
+        return output
+
+    @classmethod
+    def tearDownClass(cls):
+        ret_code = cls.daemon.poll()
+        if ret_code is None:
+            cls.daemon.terminate()
+            ret_code = cls.daemon.wait()
+        if ret_code not in (0, -SIGTERM):
+            print('Error running daemon:', cls.daemon.args)
+            print('Exit code:', ret_code)
+            print('STDOUT\n', cls.daemon.stdout.read())
+            print('STDERR\n', cls.daemon.stderr.read())
