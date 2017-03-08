@@ -4,23 +4,22 @@ Test the "snabb lwaftr check" subcommand. Does not need NIC names.
 
 import unittest
 
-from lib import sh
-from lib.test_env import COUNTERS_DIR, DATA_DIR, SNABB_CMD
+from lib.test_env import COUNTERS_DIR, DATA_DIR, SNABB_CMD, BaseTestCase
 
 
-class TestCheck(unittest.TestCase):
+class TestCheck(BaseTestCase):
 
     cmd_args = (
-        SNABB_CMD, 'lwaftr', 'check',
-        DATA_DIR / 'icmp_on_fail.conf',
-        DATA_DIR / 'empty.pcap', DATA_DIR / 'empty.pcap',
+        str(SNABB_CMD), 'lwaftr', 'check',
+        str(DATA_DIR / 'icmp_on_fail.conf'),
+        str(DATA_DIR / 'empty.pcap'), str(DATA_DIR / 'empty.pcap'),
         '/dev/null', '/dev/null',
-        COUNTERS_DIR / 'empty.lua',
+        str(COUNTERS_DIR / 'empty.lua'),
     )
 
     def execute_check_test(self, cmd_args):
-        output = sh.sudo(*cmd_args)
-        # An exception is raised by sh if the exit_code is not zero.
+        self.run_cmd(cmd_args)
+        # An exception is raised by run_cmd if the exit code is not zero.
 
     def test_check_standard(self):
         self.execute_check_test(self.cmd_args)

@@ -35,28 +35,30 @@ def tap_name():
     Return (None, 'No TAP interface available') if none found.
     """
     output = check_output(['ip', 'tuntap', 'list'])
-    tap_iface = output.split(':')[0]
+    tap_iface = output.split(b':')[0]
     if not tap_iface:
         return None, 'No TAP interface available'
     return tap_iface, None
 
 
-class DaemonBasedTest(unittest.TestCase):
+class BaseTestCase(unittest.TestCase):
     """
-    Base class for TestCases needing a "snabb lwaftr" daemon, running a
-    subcommand like "run" or "bench".
+    Base class for TestCases. It has a "run_cmd" method and daemon handling,
+    running a subcommand like "snabb lwaftr run" or "bench".
 
-    Provide the daemon args in "self.daemon_args".
+    Set the daemon args in "cls.daemon_args" to enable the daemon.
     Set "self.wait_for_daemon_startup" to True if it needs time to start up.
     """
 
     # Override these.
-    daemon_args = (str(SNABB_CMD), 'lwaftr', '--help')
+    daemon_args = ()
     wait_for_daemon_startup = False
 
     # Use setUpClass to only setup the daemon once for all tests.
     @classmethod
     def setUpClass(cls):
+        if not cls.daemon_args:
+            return
         cls.daemon = Popen(cls.daemon_args, stdout=PIPE, stderr=PIPE)
         if cls.wait_for_daemon_startup:
             time.sleep(1)
@@ -73,6 +75,8 @@ class DaemonBasedTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        if not cls.daemon_args:
+            return
         ret_code = cls.daemon.poll()
         if ret_code is None:
             cls.daemon.terminate()

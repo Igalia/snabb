@@ -9,14 +9,14 @@ are set to on-a-stick mode, so that they use one NIC each instead of two.
 import unittest
 
 from lib.test_env import (
-    BENCHDATA_DIR, DATA_DIR, SNABB_CMD, DaemonBasedTest, nic_names)
+    BENCHDATA_DIR, DATA_DIR, SNABB_CMD, BaseTestCase, nic_names)
 
 
 SNABB_PCI0, SNABB_PCI1 = nic_names()
 
 
 @unittest.skipUnless(SNABB_PCI0 and SNABB_PCI1, 'NICs not configured')
-class TestLoadtest(DaemonBasedTest):
+class TestLoadtest(BaseTestCase):
 
     daemon_args = (
         str(SNABB_CMD), 'lwaftr', 'run',
