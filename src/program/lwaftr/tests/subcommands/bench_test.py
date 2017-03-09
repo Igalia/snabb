@@ -4,9 +4,8 @@ Test the "snabb lwaftr bench" subcommand. Does not need NIC cards.
 
 import unittest
 
-from lib.test_env import (
-    BENCHMARK_FILENAME, BENCHMARK_PATH, DATA_DIR, BENCHDATA_DIR, SNABB_CMD,
-    BaseTestCase)
+from lib.test_env import (BENCHMARK_FILENAME, BENCHMARK_PATH, DATA_DIR,
+    BENCHDATA_DIR, SNABB_CMD, BaseTestCase)
 
 
 class TestBench(BaseTestCase):

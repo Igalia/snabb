@@ -25,8 +25,8 @@ class TestMonitor(BaseTestCase):
         '--on-a-stick', SNABB_PCI0,
         '--mirror', TAP_IFACE,
     )
-
     monitor_args = (str(SNABB_CMD), 'lwaftr', 'monitor', 'all')
+    wait_for_daemon_startup = True
 
     def test_monitor(self):
         monitor_args = list(self.monitor_args)

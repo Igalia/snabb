@@ -19,7 +19,7 @@ class TestCheck(BaseTestCase):
 
     def execute_check_test(self, cmd_args):
         self.run_cmd(cmd_args)
-        # An exception is raised by run_cmd if the exit code is not zero.
+        # run_cmd checks the exit code and fails the test if it is not zero.
 
     def test_check_standard(self):
         self.execute_check_test(self.cmd_args)

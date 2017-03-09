@@ -24,7 +24,6 @@ class TestLoadtest(BaseTestCase):
         '--conf', str(DATA_DIR / 'icmp_on_fail.conf'),
         '--on-a-stick', SNABB_PCI0,
     )
-
     loadtest_args = (
         str(SNABB_CMD), 'lwaftr', 'loadtest',
         '--bench-file', '/dev/null',
@@ -37,6 +36,7 @@ class TestLoadtest(BaseTestCase):
         str(BENCHDATA_DIR / 'ipv4_and_ipv6_stick_imix.pcap'), 'ALL', 'ALL',
         SNABB_PCI1,
     )
+    wait_for_daemon_startup = True
 
     def test_loadtest(self):
         output = self.run_cmd(self.loadtest_args)
