@@ -25,9 +25,9 @@ class TestCheck(BaseTestCase):
         self.execute_check_test(self.cmd_args)
 
     def test_check_on_a_stick(self):
-        onastick_cmd_args = list(self.cmd_args)
-        onastick_cmd_args.insert(3, '--on-a-stick')
-        self.execute_check_test(onastick_cmd_args)
+        onastick_args = list(self.cmd_args)
+        onastick_args.insert(3, '--on-a-stick')
+        self.execute_check_test(onastick_args)
 
 
 if __name__ == '__main__':

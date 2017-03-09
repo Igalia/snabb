@@ -24,16 +24,16 @@ class TestRun(BaseTestCase):
 
     def execute_run_test(self, cmd_args):
         output = self.run_cmd(cmd_args)
-        self.assertLess(len(output.splitlines()), 1,
-            "OUTPUT\n{}".format(output))
+        self.assertIn(b'link report', output,
+            b'\n'.join((b'OUTPUT', output)))
 
     def test_run_standard(self):
         self.execute_run_test(self.cmd_args)
 
     def test_run_reconfigurable(self):
-        reconf_cmd_args = list(self.cmd_args)
-        reconf_cmd_args.insert(3, '--reconfigurable')
-        self.execute_run_test(reconf_cmd_args)
+        reconf_args = list(self.cmd_args)
+        reconf_args.insert(3, '--reconfigurable')
+        self.execute_run_test(reconf_args)
 
 
 if __name__ == '__main__':

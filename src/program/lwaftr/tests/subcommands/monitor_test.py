@@ -7,8 +7,7 @@ Test the "snabb lwaftr monitor" subcommand. Needs a NIC name and a TAP interface
 
 import unittest
 
-from lib.test_env import (
-    BENCHDATA_DIR, DATA_DIR, SNABB_CMD, BaseTestCase, nic_names, tap_name)
+from lib.test_env import DATA_DIR, SNABB_CMD, BaseTestCase, nic_names, tap_name
 
 
 SNABB_PCI0 = nic_names()[0]
@@ -21,25 +20,22 @@ class TestMonitor(BaseTestCase):
 
     daemon_args = (
         str(SNABB_CMD), 'lwaftr', 'run',
-        '--name', 'monitor_test_daemon',
         '--bench-file', '/dev/null',
         '--conf', str(DATA_DIR / 'icmp_on_fail.conf'),
         '--on-a-stick', SNABB_PCI0,
         '--mirror', TAP_IFACE,
     )
 
-    monitor_args = (
-        str(SNABB_CMD), 'lwaftr', 'monitor',
-        '--name', 'monitor_test',
-        'all',
-    )
+    monitor_args = (str(SNABB_CMD), 'lwaftr', 'monitor', 'all')
 
     def test_monitor(self):
-        output = self.run_cmd(self.monitor_args)
-        self.assertIn('Mirror address set', output,
-            "OUTPUT\n{}".format(output))
-        self.assertIn('255.255.255.255', output,
-            "OUTPUT\n{}".format(output))
+        monitor_args = list(self.monitor_args)
+        monitor_args.append(str(self.daemon.pid))
+        output = self.run_cmd(monitor_args)
+        self.assertIn(b'Mirror address set', output,
+            b'\n'.join((b'OUTPUT', output)))
+        self.assertIn(b'255.255.255.255', output,
+            b'\n'.join((b'OUTPUT', output)))
 
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@ Environment support code for tests.
 import os
 from pathlib import Path
 from signal import SIGTERM
-from subprocess import PIPE, Popen, check_output
+from subprocess import PIPE, Popen, TimeoutExpired, check_output
 import time
 import unittest
 
@@ -23,6 +23,7 @@ SNABB_CMD = TESTS_DIR.parents[2] / 'snabb'
 BENCHMARK_FILENAME = 'benchtest.csv'
 # Snabb creates the benchmark file in the current directory
 BENCHMARK_PATH = Path.cwd() / BENCHMARK_FILENAME
+COMMAND_TIMEOUT = 10
 
 
 def nic_names():
@@ -65,12 +66,20 @@ class BaseTestCase(unittest.TestCase):
 
     def run_cmd(self, args):
         proc = Popen(args, stdout=PIPE, stderr=PIPE)
-        output, errput = proc.communicate()
-        if proc.returncode != 0:
-            msg = '\n'.join(('Error running command:', str(args),
-                'Exit code:', str(proc.returncode),
+        try:
+            output, errput = proc.communicate(timeout=COMMAND_TIMEOUT)
+        except TimeoutExpired:
+            proc.kill()
+            output, errput = proc.communicate()
+            msg = '\n'.join(('Timeout running command:', str(args),
                 'STDOUT', str(output), 'STDERR', str(errput)))
             self.fail(msg)
+        else:
+            if proc.returncode != 0:
+                msg = '\n'.join(('Error running command:', str(args),
+                    'Exit code:', str(proc.returncode),
+                    'STDOUT', str(output), 'STDERR', str(errput)))
+                self.fail(msg)
         return output
 
     @classmethod

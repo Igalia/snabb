@@ -41,7 +41,7 @@ class TestLoadtest(BaseTestCase):
     def test_loadtest(self):
         output = self.run_cmd(self.loadtest_args)
         self.assertGreater(len(output.splitlines()), 10,
-            "OUTPUT\n{}".format(output))
+            b'\n'.join((b'OUTPUT', output)))
 
 
 if __name__ == '__main__':

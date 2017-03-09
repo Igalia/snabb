@@ -21,7 +21,7 @@ class TestBench(BaseTestCase):
     )
 
     def execute_bench_test(self, cmd_args):
-        output = self.run_cmd(cmd_args)
+        self.run_cmd(cmd_args)
         self.assertTrue(BENCHMARK_PATH.is_file(),
             'Cannot find {}'.format(BENCHMARK_PATH))
         BENCHMARK_PATH.unlink()
@@ -30,9 +30,9 @@ class TestBench(BaseTestCase):
         self.execute_bench_test(self.cmd_args)
 
     def test_bench_reconfigurable(self):
-        reconf_cmd_args = list(self.cmd_args)
-        reconf_cmd_args.insert(3, '--reconfigurable')
-        self.execute_bench_test(reconf_cmd_args)
+        reconf_args = list(self.cmd_args)
+        reconf_args.insert(3, '--reconfigurable')
+        self.execute_bench_test(reconf_args)
 
 
 if __name__ == '__main__':
