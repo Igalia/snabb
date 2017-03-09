@@ -40,7 +40,8 @@ class TestLoadtest(BaseTestCase):
 
     def test_loadtest(self):
         output = self.run_cmd(self.loadtest_args)
-        self.assertTrue(len(output.splitlines()) > 10)
+        self.assertGreater(len(output.splitlines()), 10,
+            "OUTPUT\n{}".format(output))
 
 
 if __name__ == '__main__':

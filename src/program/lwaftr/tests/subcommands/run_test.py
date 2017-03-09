@@ -24,7 +24,8 @@ class TestRun(BaseTestCase):
 
     def execute_run_test(self, cmd_args):
         output = self.run_cmd(cmd_args)
-        self.assertTrue(len(output.splitlines()) > 1)
+        self.assertLess(len(output.splitlines()), 1,
+            "OUTPUT\n{}".format(output))
 
     def test_run_standard(self):
         self.execute_run_test(self.cmd_args)

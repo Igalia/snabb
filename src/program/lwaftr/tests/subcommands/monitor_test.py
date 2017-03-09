@@ -36,8 +36,10 @@ class TestMonitor(BaseTestCase):
 
     def test_monitor(self):
         output = self.run_cmd(self.monitor_args)
-        self.assertIn('Mirror address set', output)
-        self.assertIn('255.255.255.255', output)
+        self.assertIn('Mirror address set', output,
+            "OUTPUT\n{}".format(output))
+        self.assertIn('255.255.255.255', output,
+            "OUTPUT\n{}".format(output))
 
 
 if __name__ == '__main__':
