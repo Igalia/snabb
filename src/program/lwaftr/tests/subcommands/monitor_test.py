@@ -6,6 +6,7 @@ Test the "snabb lwaftr monitor" subcommand. Needs a NIC name and a TAP interface
 """
 
 import unittest
+import time
 
 from lib import sh
 from lib.test_env import DATA_DIR, SNABB_CMD, nic_names, tap_name
@@ -38,6 +39,7 @@ class TestMonitor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.run_cmd = sh.sudo(*cls.run_cmd_args, _bg=True)
+        time.sleep(2)
 
     def test_monitor(self):
         output = sh.sudo(*self.monitor_cmd_args)
