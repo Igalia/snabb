@@ -3,6 +3,12 @@ Test the "snabb lwaftr config" subcommand. Does not need NIC names because
 it uses the "bench" subcommand.
 """
 
+import json
+import os
+from signal import SIGTERM
+import socket
+from subprocess import PIPE, Popen
+import time
 import unittest
 
 from lib.test_env import BENCHDATA_DIR, DATA_DIR, ENC, SNABB_CMD, BaseTestCase
@@ -17,6 +23,7 @@ DAEMON_ARGS = (
     str(BENCHDATA_DIR / 'ipv4-0550.pcap'),
     str(BENCHDATA_DIR / 'ipv6-0550.pcap'),
 )
+SOCKET_PATH = '/tmp/snabb-lwaftr-listen-sock-%s' % DAEMON_PROC_NAME
 
 
 class TestConfigGet(BaseTestCase):
@@ -63,6 +70,50 @@ class TestConfigGet(BaseTestCase):
         output = self.run_cmd(cmd_args)
         self.assertEqual(output.strip(), b'178.79.150.15',
             '\n'.join(('OUTPUT', str(output, ENC))))
+
+
+class TestConfigListen(BaseTestCase):
+    """
+    Test it can listen, send a command and get a response. Only test the
+    socket method of communicating with the listen command, due to the
+    difficulties of testing interactive scripts.
+    """
+
+    daemon_args = DAEMON_ARGS
+    wait_for_daemon_startup = True
+
+    listen_args = (str(SNABB_CMD), 'config', 'listen',
+        '--socket', SOCKET_PATH, DAEMON_PROC_NAME)
+
+    def test_listen(self):
+        # Start the listen command with a socket.
+        listen_daemon = Popen(self.listen_args, stdout=PIPE, stderr=PIPE)
+        # Wait a short while for the socket to be created.
+        time.sleep(1)
+        # Send command to and receive response from the listen command.
+        # (Implicit string concatenation, no summing needed.)
+        get_cmd = (b'{ "id": "0", "verb": "get",'
+            b' "path": "/routes/route[addr=1.2.3.4]/port" }\n')
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.connect(SOCKET_PATH)
+            sock.sendall(get_cmd)
+            resp = str(sock.recv(200), ENC)
+        finally:
+            sock.close()
+        status = json.loads(resp)['status']
+        self.assertEqual(status, 'ok')
+        # Terminate the listen command.
+        listen_daemon.terminate()
+        ret_code = listen_daemon.wait()
+        if ret_code not in (0, -SIGTERM):
+            print('Error terminating daemon:', listen_daemon.args)
+            print('Exit code:', ret_code)
+            print('STDOUT\n', str(listen_daemon.stdout.read(), ENC))
+            print('STDERR\n', str(listen_daemon.stderr.read(), ENC))
+        listen_daemon.stdout.close()
+        listen_daemon.stderr.close()
+        os.unlink(SOCKET_PATH)
 
 
 class TestConfigMisc(BaseTestCase):

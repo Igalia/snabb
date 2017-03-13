@@ -93,7 +93,9 @@ class BaseTestCase(unittest.TestCase):
             cls.daemon.terminate()
             ret_code = cls.daemon.wait()
         if ret_code not in (0, -SIGTERM):
-            print('Error running daemon:', cls.daemon.args)
+            print('Error terminating daemon:', cls.daemon.args)
             print('Exit code:', ret_code)
             print('STDOUT\n', str(cls.daemon.stdout.read(), ENC))
             print('STDERR\n', str(cls.daemon.stderr.read(), ENC))
+        cls.daemon.stdout.close()
+        cls.daemon.stderr.close()
