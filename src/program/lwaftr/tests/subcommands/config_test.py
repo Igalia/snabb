@@ -41,34 +41,41 @@ class TestConfigGet(BaseTestCase):
         cmd_args = list(self.config_args)
         cmd_args.append('/softwire-config/internal-interface/ip')
         output = self.run_cmd(cmd_args)
-        self.assertEqual(output.strip(), b'8:9:a:b:c:d:e:f',
+        self.assertEqual(
+            output.strip(), b'8:9:a:b:c:d:e:f',
             '\n'.join(('OUTPUT', str(output, ENC))))
 
     def test_get_external_iface(self):
         cmd_args = list(self.config_args)
         cmd_args.append('/softwire-config/external-interface/ip')
         output = self.run_cmd(cmd_args)
-        self.assertEqual(output.strip(), b'10.10.10.10',
+        self.assertEqual(
+            output.strip(), b'10.10.10.10',
             '\n'.join(('OUTPUT', str(output, ENC))))
 
     def test_get_b4_ipv6(self):
         cmd_args = list(self.config_args)
         # Implicit string concatenation, do not add commas.
-        cmd_args.append('/softwire-config/binding-table/softwire'
+        cmd_args.append(
+            '/softwire-config/binding-table/softwire'
             '[ipv4=178.79.150.233][psid=7850]/b4-ipv6')
         output = self.run_cmd(cmd_args)
-        self.assertEqual(output.strip(), b'127:11:12:13:14:15:16:128',
+        self.assertEqual(
+            output.strip(), b'127:11:12:13:14:15:16:128',
             '\n'.join(('OUTPUT', str(output, ENC))))
 
     def test_get_ietf_path(self):
         cmd_args = list(self.config_args)[:-1]
-        cmd_args.extend(('--schema=ietf-softwire', DAEMON_PROC_NAME,
+        cmd_args.extend((
+            '--schema=ietf-softwire', DAEMON_PROC_NAME,
             # Implicit string concatenation, do not add commas.
             '/softwire-config/binding/br/br-instances/'
             'br-instance[id=1]/binding-table/binding-entry'
-            '[binding-ipv6info=127:22:33:44:55:66:77:128]/binding-ipv4-addr'))
+            '[binding-ipv6info=127:22:33:44:55:66:77:128]/binding-ipv4-addr',
+        ))
         output = self.run_cmd(cmd_args)
-        self.assertEqual(output.strip(), b'178.79.150.15',
+        self.assertEqual(
+            output.strip(), b'178.79.150.15',
             '\n'.join(('OUTPUT', str(output, ENC))))
 
 
@@ -132,26 +139,33 @@ class TestConfigMisc(BaseTestCase):
         """
         # External IPv4.
         add_args = self.get_cmd_args('add')
-        add_args.extend(('/softwire-config/binding-table/softwire',
-            '{ ipv4 1.2.3.4; psid 72; b4-ipv6 ::1; br 1; }'))
+        add_args.extend((
+            '/softwire-config/binding-table/softwire',
+            '{ ipv4 1.2.3.4; psid 72; b4-ipv6 ::1; br 1; }',
+        ))
         self.run_cmd(add_args)
         get_args = self.get_cmd_args('get')
-        get_args.append('/softwire-config/binding-table/softwire[ipv4=1.2.3.4][psid=72]')
+        get_args.append(
+            '/softwire-config/binding-table/softwire[ipv4=1.2.3.4][psid=72]')
         output = self.run_cmd(get_args)
         # run_cmd checks the exit code and fails the test if it is not zero.
         get_args[-1] += '/b4-ipv6'
-        self.assertEqual(output.strip(), b'b4-ipv6 ::1;',
+        self.assertEqual(
+            output.strip(), b'b4-ipv6 ::1;',
             '\n'.join(('OUTPUT', str(output, ENC))))
 
     def test_get_state(self):
         get_state_args = self.get_cmd_args('get-state')
         # Select a few at random which should have non-zero results.
         for query in (
-                '/softwire-state/in-ipv4-bytes', '/softwire-state/out-ipv4-bytes'):
+                '/softwire-state/in-ipv4-bytes',
+                '/softwire-state/out-ipv4-bytes',
+            ):
             cmd_args = list(get_state_args)
             cmd_args.append(query)
             output = self.run_cmd(cmd_args)
-            self.assertNotEqual(output.strip(), b'0',
+            self.assertNotEqual(
+                output.strip(), b'0',
                 '\n'.join(('OUTPUT', str(output, ENC))))
         get_state_args.append('/')
         self.run_cmd(get_state_args)
@@ -161,7 +175,10 @@ class TestConfigMisc(BaseTestCase):
         # Verify that the thing we want to remove actually exists.
         get_args = self.get_cmd_args('get')
         get_args.append(
-            '/softwire-config/binding-table/softwire[ipv4=178.79.150.2][psid=7850]/')
+            # Implicit string concatenation, no summing needed.
+            '/softwire-config/binding-table/softwire'
+            '[ipv4=178.79.150.2][psid=7850]/'
+        )
         self.run_cmd(get_args)
         # run_cmd checks the exit code and fails the test if it is not zero.
         # Remove it.
@@ -185,40 +202,51 @@ class TestConfigMisc(BaseTestCase):
         get_args = list(set_args)[:-1]
         get_args[2] = 'get'
         output = self.run_cmd(get_args)
-        self.assertEqual(output.strip(), bytes(test_ipv4, ENC),
+        self.assertEqual(
+            output.strip(), bytes(test_ipv4, ENC),
             '\n'.join(('OUTPUT', str(output, ENC))))
 
         # Binding table.
         test_ipv4, test_ipv6, test_psid = '178.79.150.15', '::1', '0'
         set_args = self.get_cmd_args('set')
-        # Implicit string concatenation, do not add commas.
-        set_args.extend(('/softwire-config/binding-table/softwire[ipv4=%s]'
-            '[psid=%s]/b4-ipv6' % (test_ipv4, test_psid), test_ipv6))
+        # Implicit string concatenation, no summing needed.
+        set_args.extend((
+            '/softwire-config/binding-table/softwire[ipv4=%s][psid=%s]/b4-ipv6'
+            % (test_ipv4, test_psid),
+            test_ipv6,
+        ))
         self.run_cmd(set_args)
         get_args = list(set_args)[:-1]
         get_args[2] = 'get'
         output = self.run_cmd(get_args)
-        self.assertEqual(output.strip(), bytes(test_ipv6, ENC),
+        self.assertEqual(
+            output.strip(), bytes(test_ipv6, ENC),
             '\n'.join(('OUTPUT', str(output, ENC))))
 
         # Check that the value we just set is the same in the IETF schema.
         # We actually need to look this up backwards, let's just check the
         # same IPv4 address as was used to set it above.
         get_args = self.get_cmd_args('get')[:-1]
-        get_args.extend(('--schema=ietf-softwire', DAEMON_PROC_NAME,
-            # Implicit string concatenation, do not add commas.
-            '/softwire-config/binding/br/br-instances/br-instance[id=1]/'
-            'binding-table/binding-entry[binding-ipv6info=::1]/binding-ipv4-addr'))
+        get_args.extend((
+            '--schema=ietf-softwire', DAEMON_PROC_NAME,
+            # Implicit string concatenation, no summing needed.
+            '/softwire-config/binding/br/br-instances/'
+            'br-instance[id=1]/binding-table/binding-entry'
+            '[binding-ipv6info=::1]/binding-ipv4-addr',
+        ))
         output = self.run_cmd(get_args)
-        self.assertEqual(output.strip(), bytes(test_ipv4, ENC),
+        self.assertEqual(
+            output.strip(), bytes(test_ipv4, ENC),
             '\n'.join(('OUTPUT', str(output, ENC))))
 
         # Check the portset: the IPv4 address alone is not unique.
         get_args = self.get_cmd_args('get')[:-1]
-        get_args.extend(('--schema=ietf-softwire', DAEMON_PROC_NAME,
-            # Implicit string concatenation, do not add commas.
+        get_args.extend((
+            '--schema=ietf-softwire', DAEMON_PROC_NAME,
+            # Implicit string concatenation, no summing needed.
             '/softwire-config/binding/br/br-instances/br-instance[id=1]/'
-            'binding-table/binding-entry[binding-ipv6info=::1]/port-set/psid'))
+            'binding-table/binding-entry[binding-ipv6info=::1]/port-set/psid',
+        ))
         output = self.run_cmd(get_args)
         self.assertEqual(output.strip(), bytes(test_psid, ENC),
             '\n'.join(('OUTPUT', str(output, ENC))))
