@@ -11,7 +11,7 @@ from subprocess import PIPE, Popen
 import time
 import unittest
 
-from lib.test_env import BENCHDATA_DIR, DATA_DIR, ENC, SNABB_CMD, BaseTestCase
+from test_env import BENCHDATA_DIR, DATA_DIR, ENC, SNABB_CMD, BaseTestCase
 
 
 DAEMON_PROC_NAME = 'config_test_daemon'
