@@ -1,0 +1,129 @@
+"""
+Test the "snabb lwaftr query" subcommand. Needs NIC names.
+"""
+
+from pathlib import Path
+import unittest
+
+from test_env import DATA_DIR, ENC, SNABB_CMD, BaseTestCase, nic_names
+
+
+DAEMON_PROC_NAME = 'query_test_daemon'
+SNABB_PCI0, SNABB_PCI1 = nic_names()
+RUN_DIR = Path('/var/run/snabb')
+
+
+@unittest.skipUnless(SNABB_PCI0 and SNABB_PCI1, 'NICs not configured')
+class TestQueryStandard(BaseTestCase):
+
+    daemon_args = [
+        str(SNABB_CMD), 'lwaftr', 'run',
+        '--name', DAEMON_PROC_NAME,
+        '--conf', str(DATA_DIR / 'no_icmp.conf'),
+        '--v4', SNABB_PCI0,
+        '--v6', SNABB_PCI1,
+    ]
+
+    query_args = (str(SNABB_CMD), 'lwaftr', 'query')
+
+    def test_query_all(self):
+        all_args = list(self.query_args)
+        all_args.append('--list-all')
+        output = self.run_cmd(all_args)
+        self.assertGreater(
+            len(output.splitlines()), 1,
+            '\n'.join(('OUTPUT', str(output, ENC))))
+
+    def execute_query_test(self, cmd_args):
+        output = self.run_cmd(cmd_args)
+        self.assertGreater(
+            len(output.splitlines()), 1,
+            '\n'.join(('OUTPUT', str(output, ENC))))
+        cmd_args = cmd_args.append('memuse-ipv')
+        output = self.run_cmd(cmd_args)
+        self.assertGreater(
+            len(output.splitlines()), 1,
+            '\n'.join(('OUTPUT', str(output, ENC))))
+        cmd_args[-1] = "no-such-counter"
+        output = self.run_cmd(cmd_args)
+        self.assertGreater(
+            len(output.splitlines()), 1,
+            '\n'.join(('OUTPUT', str(output, ENC))))
+
+    def get_lwaftr_pid(self):
+        output = self.run_cmd(('ps', 'aux'))
+        pids = []
+        for line in output.splitlines():
+            if SNABB_PCI0 in line:
+                pids.append(line.split[1])
+        for pid in pids:
+            if (RUN_DIR / pid / 'apps' / 'lwaftr').is_dir():
+                return pid
+
+    def test_query_by_pid(self):
+        lwaftr_pid = self.get_lwaftr_pid()
+        pid_args = list(self.query_args)
+        pid_args = pid_args.append(str(lwaftr_pid))
+        self.execute_query_test(pid_args)
+
+    def test_query_by_name(self):
+        name_args = list(self.query_args)
+        name_args = name_args.extend(('--name', DAEMON_PROC_NAME))
+        self.execute_query_test(name_args)
+
+
+@unittest.skipUnless(SNABB_PCI0 and SNABB_PCI1, 'NICs not configured')
+class TestQueryReconfigurable(TestQueryStandard):
+
+    daemon_args = TestQueryStandard.daemon_args.insert(3, '--reconfigurable')
+
+    def get_all_leader_pids(self):
+        output = self.run_cmd(('ps', 'aux'))
+        pids = []
+        for line in output.splitlines():
+            if ((SNABB_PCI0 in line) and
+                    ('--reconfigurable' in line) and
+                    ('grep' not in line)):
+                pids.append(line.split[1])
+        return pids
+
+    def get_leader_pid(self):
+        for pid in self.get_all_leader_pids():
+            if (RUN_DIR / pid).is_dir():
+                return pid
+
+    def get_follower_pid(self):
+        leader_pids = self.get_all_leader_pids()
+        for run_pid in RUN_DIR.iterdir():
+            run_pid = run_pid.name
+            for leader_pid in leader_pids:
+                if (RUN_DIR / leader_pid / 'group').is_symlink():
+                    return run_pid
+
+# function get_lwaftr_follower {
+#     local leaders=$(ps aux | grep "\-\-reconfigurable" | grep $SNABB_PCI0 | grep -v "grep" | awk '{print $2}')
+#     for pid in $(ls /var/run/snabb); do
+#         for leader in ${leaders[@]}; do
+#             if [[ -L "/var/run/snabb/$pid/group" ]]; then
+#                 local target=$(ls -l /var/run/snabb/$pid/group | awk '{print $11}' | grep -oe "[0-9]\+")
+#                 if [[ "$leader" == "$target" ]]; then
+#                     echo $pid
+#                 fi
+#             fi
+#         done
+#     done
+# }
+
+    def test_query_by_pid(self):
+        leader_pid = self.get_leader_pid()
+        pid_args = list(self.query_args)
+        pid_args = pid_args.append(str(leader_pid))
+        self.execute_query_test(pid_args)
+        follower_pid = self.get_follower_pid()
+        pid_args = list(self.query_args)
+        pid_args = pid_args.append(str(follower_pid))
+        self.execute_query_test(pid_args)
+
+
+if __name__ == '__main__':
+    unittest.main()
