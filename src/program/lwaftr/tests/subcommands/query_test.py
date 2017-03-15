@@ -2,6 +2,7 @@
 Test the "snabb lwaftr query" subcommand. Needs NIC names.
 """
 
+import os
 from pathlib import Path
 import unittest
 
@@ -97,29 +98,24 @@ class TestQueryReconfigurable(TestQueryStandard):
         for run_pid in RUN_DIR.iterdir():
             run_pid = run_pid.name
             for leader_pid in leader_pids:
-                if (RUN_DIR / leader_pid / 'group').is_symlink():
-                    return run_pid
-
-# function get_lwaftr_follower {
-#     local leaders=$(ps aux | grep "\-\-reconfigurable" | grep $SNABB_PCI0 | grep -v "grep" | awk '{print $2}')
-#     for pid in $(ls /var/run/snabb); do
-#         for leader in ${leaders[@]}; do
-#             if [[ -L "/var/run/snabb/$pid/group" ]]; then
-#                 local target=$(ls -l /var/run/snabb/$pid/group | awk '{print $11}' | grep -oe "[0-9]\+")
-#                 if [[ "$leader" == "$target" ]]; then
-#                     echo $pid
-#                 fi
-#             fi
-#         done
-#     done
-# }
+                group_link = RUN_DIR / leader_pid / 'group'
+                if group_link.is_symlink():
+                    pointed_to = Path(os.readlink(str(group_link)))
+                    # ('/', 'var', 'run', 'snabb', pid, 'group')
+                    pointed_pid = pointed_to.parts[4]
+                    if pointed_pid == leader_pid:
+                        return run_pid
 
     def test_query_by_pid(self):
         leader_pid = self.get_leader_pid()
+        if not leader_pid:
+            self.fail('Could not find the leader PID')
         pid_args = list(self.query_args)
         pid_args = pid_args.append(str(leader_pid))
         self.execute_query_test(pid_args)
         follower_pid = self.get_follower_pid()
+        if not follower_pid:
+            self.fail('Could not find the follower PID')
         pid_args = list(self.query_args)
         pid_args = pid_args.append(str(follower_pid))
         self.execute_query_test(pid_args)
