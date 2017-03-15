@@ -17,13 +17,14 @@ RUN_DIR = Path('/var/run/snabb')
 @unittest.skipUnless(SNABB_PCI0 and SNABB_PCI1, 'NICs not configured')
 class TestQueryStandard(BaseTestCase):
 
-    daemon_args = [
+    daemon_args = (
         str(SNABB_CMD), 'lwaftr', 'run',
         '--name', DAEMON_PROC_NAME,
         '--conf', str(DATA_DIR / 'no_icmp.conf'),
         '--v4', SNABB_PCI0,
         '--v6', SNABB_PCI1,
-    ]
+    )
+    wait_for_daemon_startup = True
 
     query_args = (str(SNABB_CMD), 'lwaftr', 'query')
 
@@ -40,7 +41,7 @@ class TestQueryStandard(BaseTestCase):
         self.assertGreater(
             len(output.splitlines()), 1,
             '\n'.join(('OUTPUT', str(output, ENC))))
-        cmd_args = cmd_args.append('memuse-ipv')
+        cmd_args.append('memuse-ipv')
         output = self.run_cmd(cmd_args)
         self.assertGreater(
             len(output.splitlines()), 1,
@@ -52,11 +53,11 @@ class TestQueryStandard(BaseTestCase):
             '\n'.join(('OUTPUT', str(output, ENC))))
 
     def get_lwaftr_pid(self):
-        output = self.run_cmd(('ps', 'aux'))
+        output = str(self.run_cmd(('ps', 'aux')), ENC)
         pids = []
         for line in output.splitlines():
             if SNABB_PCI0 in line:
-                pids.append(line.split[1])
+                pids.append(line.split()[1])
         for pid in pids:
             if (RUN_DIR / pid / 'apps' / 'lwaftr').is_dir():
                 return pid
@@ -64,28 +65,35 @@ class TestQueryStandard(BaseTestCase):
     def test_query_by_pid(self):
         lwaftr_pid = self.get_lwaftr_pid()
         pid_args = list(self.query_args)
-        pid_args = pid_args.append(str(lwaftr_pid))
+        pid_args.append(str(lwaftr_pid))
         self.execute_query_test(pid_args)
 
     def test_query_by_name(self):
         name_args = list(self.query_args)
-        name_args = name_args.extend(('--name', DAEMON_PROC_NAME))
+        name_args.extend(('--name', DAEMON_PROC_NAME))
         self.execute_query_test(name_args)
 
 
 @unittest.skipUnless(SNABB_PCI0 and SNABB_PCI1, 'NICs not configured')
 class TestQueryReconfigurable(TestQueryStandard):
 
-    daemon_args = TestQueryStandard.daemon_args.insert(3, '--reconfigurable')
+    daemon_args = (
+        str(SNABB_CMD), 'lwaftr', 'run', '--reconfigurable',
+        '--name', DAEMON_PROC_NAME,
+        '--conf', str(DATA_DIR / 'no_icmp.conf'),
+        '--v4', SNABB_PCI0,
+        '--v6', SNABB_PCI1,
+    )
+    wait_for_daemon_startup = True
 
     def get_all_leader_pids(self):
-        output = self.run_cmd(('ps', 'aux'))
+        output = str(self.run_cmd(('ps', 'aux')), ENC)
         pids = []
         for line in output.splitlines():
             if ((SNABB_PCI0 in line) and
                     ('--reconfigurable' in line) and
                     ('grep' not in line)):
-                pids.append(line.split[1])
+                pids.append(line.split()[1])
         return pids
 
     def get_leader_pid(self):
@@ -111,13 +119,13 @@ class TestQueryReconfigurable(TestQueryStandard):
         if not leader_pid:
             self.fail('Could not find the leader PID')
         pid_args = list(self.query_args)
-        pid_args = pid_args.append(str(leader_pid))
+        pid_args.append(str(leader_pid))
         self.execute_query_test(pid_args)
         follower_pid = self.get_follower_pid()
         if not follower_pid:
             self.fail('Could not find the follower PID')
         pid_args = list(self.query_args)
-        pid_args = pid_args.append(str(follower_pid))
+        pid_args.append(str(follower_pid))
         self.execute_query_test(pid_args)
 
 
