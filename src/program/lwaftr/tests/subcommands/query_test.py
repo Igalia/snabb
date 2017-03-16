@@ -48,7 +48,7 @@ class TestQueryStandard(BaseTestCase):
             '\n'.join(('OUTPUT', str(output, ENC))))
         cmd_args[-1] = "no-such-counter"
         output = self.run_cmd(cmd_args)
-        self.assertGreater(
+        self.assertEqual(
             len(output.splitlines()), 1,
             '\n'.join(('OUTPUT', str(output, ENC))))
 
