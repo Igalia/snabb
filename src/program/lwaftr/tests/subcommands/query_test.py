@@ -106,12 +106,12 @@ class TestQueryReconfigurable(TestQueryStandard):
         for run_pid in RUN_DIR.iterdir():
             run_pid = run_pid.name
             for leader_pid in leader_pids:
-                group_link = RUN_DIR / leader_pid / 'group'
+                group_link = RUN_DIR / run_pid / 'group'
                 if group_link.is_symlink():
-                    pointed_to = Path(os.readlink(str(group_link)))
+                    target = Path(os.readlink(str(group_link)))
                     # ('/', 'var', 'run', 'snabb', pid, 'group')
-                    pointed_pid = pointed_to.parts[4]
-                    if pointed_pid == leader_pid:
+                    target_pid = target.parts[4]
+                    if target_pid == leader_pid:
                         return run_pid
 
     def test_query_by_pid(self):
