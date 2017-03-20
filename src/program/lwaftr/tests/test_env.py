@@ -54,8 +54,12 @@ class BaseTestCase(unittest.TestCase):
         # Check that the daemon started up correctly.
         ret_code = cls.daemon.poll()
         if ret_code is not None:
+            cls.reportAndFail('Error starting up daemon:', ret_code)
+
+    @classmethod
+    def reportAndFail(cls, msg, ret_code):
             msg_lines = [
-                'Error starting up daemon:', str(cls.daemon.args),
+                msg, str(cls.daemon.args),
                 'Exit code: %s' % ret_code,
             ]
             if cls.daemon.stdout.readable:
@@ -96,16 +100,4 @@ class BaseTestCase(unittest.TestCase):
             cls.daemon.stdout.close()
             cls.daemon.stderr.close()
         else:
-            msg_lines = [
-                'Error terminating daemon:', str(cls.daemon.args),
-                'Exit code: %s' % ret_code,
-            ]
-            if cls.daemon.stdout.readable:
-                msg_lines.extend(
-                    ('STDOUT\n', str(cls.daemon.stdout.read(), ENC)))
-            if cls.daemon.stderr.readable:
-                msg_lines.extend(
-                    ('STDERR\n', str(cls.daemon.stderr.read(), ENC)))
-            cls.daemon.stdout.close()
-            cls.daemon.stderr.close()
-            cls.fail(cls, '\n'.join(msg_lines))
+            cls.reportAndFail('Error terminating daemon:', ret_code)
