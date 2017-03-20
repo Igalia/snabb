@@ -27,7 +27,7 @@ class TestRun(BaseTestCase):
         self.assertIn(b'link report', output,
             b'\n'.join((b'OUTPUT', output)))
 
-    def test_run_standard(self):
+    def test_run_not_reconfigurable(self):
         self.execute_run_test(self.cmd_args)
 
     def test_run_reconfigurable(self):
