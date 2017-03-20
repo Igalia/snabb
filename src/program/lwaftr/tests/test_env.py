@@ -38,7 +38,7 @@ class BaseTestCase(unittest.TestCase):
     Base class for TestCases. It has a "run_cmd" method and daemon handling,
     running a subcommand like "snabb lwaftr run" or "bench".
 
-    Set "daemon args" to enable the daemon.
+    Set "daemon_args" to enable the daemon.
     """
 
     # Override these.
