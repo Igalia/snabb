@@ -23,19 +23,20 @@ class TestMonitor(BaseTestCase):
         '--bench-file', '/dev/null',
         '--conf', str(DATA_DIR / 'icmp_on_fail.conf'),
         '--on-a-stick', SNABB_PCI0,
-        '--mirror', # TAP interface name added in setUpClass.
+        '--mirror',  # TAP interface name added in setUpClass.
     ]
     monitor_args = (str(SNABB_CMD), 'lwaftr', 'monitor', 'all')
 
     # Use setUpClass to only setup the daemon once for all tests.
     @classmethod
     def setUpClass(cls):
+        # Create the TAP interface and append its name to daemon_args
+        # before calling the superclass' setUpClass, which needs both.
         # 'tapXXXXXX' where X is a 0-9 digit.
         cls.tap_name = 'tap%s' % randint(100000, 999999)
         check_call(('ip', 'tuntap', 'add', cls.tap_name, 'mode', 'tap'))
         cls.daemon_args.append(cls.tap_name)
-        # Create the TAP interface and append its name to daemon_args
-        # before calling the superclass' setUpClass, which needs both.
+        cls.prev_daemon_args = BaseTestCase.daemon_args
         BaseTestCase.daemon_args = cls.daemon_args
         try:
             BaseTestCase.setUpClass()
@@ -55,9 +56,12 @@ class TestMonitor(BaseTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        BaseTestCase.tearDownClass()
-        # Clean up the TAP interface.
-        call(('ip', 'tuntap', 'delete', cls.tap_name, 'mode', 'tap'))
+        try:
+            BaseTestCase.tearDownClass()
+        finally:
+            BaseTestCase.daemon_args = cls.prev_daemon_args
+            # Clean up the TAP interface.
+            call(('ip', 'tuntap', 'delete', cls.tap_name, 'mode', 'tap'))
 
 
 if __name__ == '__main__':

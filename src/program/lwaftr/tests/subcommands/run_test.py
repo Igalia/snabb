@@ -15,7 +15,7 @@ class TestRun(BaseTestCase):
 
     cmd_args = (
         str(SNABB_CMD), 'lwaftr', 'run',
-        '--duration', '0.1',
+        '--duration', '1',
         '--bench-file', '/dev/null',
         '--conf', str(DATA_DIR / 'icmp_on_fail.conf'),
         '--v4', SNABB_PCI0,
