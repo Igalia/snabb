@@ -1,4 +1,4 @@
 #!/bin/sh
 cd "`dirname \"$0\"`"
-./soaktest.sh
-./soaktest-vlan.sh
+python3 ./soaktest.py
+python3 ./soaktest-vlan.py

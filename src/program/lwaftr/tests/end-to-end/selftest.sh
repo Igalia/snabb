@@ -1,4 +1,4 @@
 #!/bin/sh
 cd "`dirname \"$0\"`"
-./end-to-end.sh
-./end-to-end-vlan.sh
+python3 ./end-to-end.py
+python3 ./end-to-end-vlan.py
