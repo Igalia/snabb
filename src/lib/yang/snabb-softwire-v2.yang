@@ -346,13 +346,6 @@ module snabb-softwire-v2 {
            "Port set ID.";
         }
 
-        leaf padding {
-          type uint16 { range 0..0; }
-          default 0;
-          description
-           "Reserved bytes.";
-        }
-
         leaf br-address {
           type inet:ipv6-address;
           mandatory true;
