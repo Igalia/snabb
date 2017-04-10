@@ -125,12 +125,10 @@ function lwaftr_app(c, conf)
 
    append(preprocessing_apps_v4,   { name = "arp",        input = "south", output = "north" })
    append(preprocessing_apps_v4,   { name = "icmpechov4", input = "south", output = "north" })
-   prepend(postprocessing_apps_v4, { name = "icmpechov4", input = "north", output = "south" })
    prepend(postprocessing_apps_v4, { name = "arp",        input = "north", output = "south" })
 
    append(preprocessing_apps_v6,   { name = "ndp",        input = "south", output = "north" })
    append(preprocessing_apps_v6,   { name = "icmpechov6", input = "south", output = "north" })
-   prepend(postprocessing_apps_v6, { name = "icmpechov6", input = "north", output = "south" })
    prepend(postprocessing_apps_v6, { name = "ndp",        input = "north", output = "south" })
 
    set_preprocessors(c, preprocessing_apps_v4, "lwaftr.v4")
