@@ -771,9 +771,10 @@ function resolve(schema, features)
       end
       if node.kind == 'feature' then
          node.module_id = lookup(env, 'module_id', '_')
-         if not (features[node.module_id] or {})[node.id] then
-            node.unavailable = true
+         if not features[node.module_id] then
+            features[node.module_id] = {}
          end
+         features[node.module_id][node.id] = node
       end
       for _,feature in ipairs(pop_prop(node, 'if_features') or {}) do
          local feature_node = lookup_lazy(env, 'features', feature)
