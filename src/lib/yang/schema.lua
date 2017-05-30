@@ -709,6 +709,8 @@ function resolve(schema, features)
          elseif node.id == 'identityref' then
             node.bases = resolve_bases(node.bases, env)
             node.default_prefix = schema.id
+         elseif node.id == 'leafref' then
+            -- TODO: Move resolve_leafrefs here.
          end
          node.primitive_type = node.id
       end
@@ -890,13 +892,101 @@ function parse_schema_file(filename)
    return schema_from_ast(parser.parse_file(filename))
 end
 
+local function resolve_leafrefs (schema, node, route)
+   node = node or schema
+   route = route or ""
+   local function to_absolute_path (route)
+      local ret = {}
+      for part in route:gmatch("[^/]+") do
+         if part ~= 'body' then
+            table.insert(ret, part)
+         end
+      end
+      table.remove(ret)
+      return "/"..table.concat(ret, "/")
+   end
+   local function node_at (schema, route)
+      local node = schema
+      local t = {}
+      for key in route:gmatch("[^/]+") do
+         table.insert(t, key)
+      end
+      for i=1,#t-1 do
+         local key = t[i]
+         node = node[key]
+      end
+      local last_key = t[#t]
+      return node, last_key
+   end
+   -- Converts a path that might be relative to absolute.
+   local function rel_to_abs (abs, path)
+      if path:match("^/") then return path end
+      if path:match("^./") then
+         return abs..path:strsub(2)
+      end
+      if path:match("^../") then
+         -- Remove ../ from path and count upper levels.
+         local level = 0
+         while path:match("^../") do
+            path = path:gsub("^../", "")
+            level = level + 1
+         end
+         -- Convert path to array of parts.
+         local aux = {}
+         for part in abs:gmatch("[^/]+") do
+            table.insert(aux, part)
+         end
+         -- Pop up many upper levels.
+         for i=1,level do table.remove(aux) end
+         return "/"..table.concat(aux, "/").."/"..path
+      end
+   end
+   local function evaluate (schema, path)
+      local function path_to_array (path)
+         local ret = {}
+         for each in path:gmatch("[^/]+") do
+            table.insert(ret, each)
+         end
+         return ret
+      end
+      local function f (node, t)
+         for k, v in pairs(node) do
+            if k == t[1] then
+               table.remove(t, 1)
+               if #t == 0 then
+                  return assert(v)
+               end
+               return f(node[k], t)
+            end
+            if k == 'body' then
+               return f(node.body, t)
+            end
+         end
+      end
+      return f(schema, path_to_array(path))
+   end
+   for k,v in pairs(node) do
+      if type(v) == 'table' then
+         resolve_leafrefs(schema, v, route..'/'..k)
+      end
+      if k == 'leafref' then
+         local path = rel_to_abs(to_absolute_path(route), node.leafref)
+         local _node, key = node_at(schema, route)
+         _node[key] = evaluate(schema, path)
+      end
+   end
+   return schema
+end
+
 function load_schema(src, filename)
    local s, e = resolve(primitivize(parse_schema(src, filename)))
-   return inherit_config(s), e
+   s, e = inherit_config(s), e
+   return resolve_leafrefs(s), e
 end
 function load_schema_file(filename)
    local s, e = resolve(primitivize(parse_schema_file(filename)))
-   return inherit_config(s), e
+   s, e = inherit_config(s), e
+   return resolve_leafrefs(s), e
 end
 load_schema_file = util.memoize(load_schema_file)
 function load_schema_by_name(name, revision)
