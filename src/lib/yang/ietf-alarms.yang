@@ -856,7 +856,7 @@ module ietf-alarms {
                 uses common-alarm-parameters;
                 uses resource-alarm-parameters;
 
-                list operator-state-change {
+                list operator-state-revision {
                     if-feature operator-actions;
                     key time;
                     description
