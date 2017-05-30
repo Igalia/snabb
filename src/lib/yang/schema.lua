@@ -632,15 +632,24 @@ function resolve(schema, features)
       node[prop] = nil
       return val
    end
-   local function lookup(env, prop, name)
-      if not env then error(prop..' not found: '..name) end
+   local function lookup(env, prop, name, opts)
+      if not opts then opts = {} end
+      if not env then
+         if opts.may_fail then return end
+         error(prop..' not found: '..name)
+      end
       if not env[prop] or not env[prop][name] then
-         return lookup(env.env, prop, name)
+         return lookup(env.env, prop, name, opts)
       end
       return env[prop][name]
    end
-   local function lookup_lazy(env, prop, name)
-      local val = lookup(env, prop, name)
+   local function lookup_lazy(env, prop, name, opts)
+      if not opts then opts = {} end
+      local val = lookup(env, prop, name, opts)
+      if not val then
+         assert(opts.may_fail)
+         return nil
+      end
       if type(val) == 'table' then return val end
       -- Force lazy expansion and memoize result.
       return val()
@@ -755,19 +764,22 @@ function resolve(schema, features)
       end
       if node.kind == 'feature' then
          node.module_id = lookup(env, 'module_id', '_')
-         if not (features[node.module_id] or {})[node.id] then
-            node.unavailable = true
+         if not features[node.module_id] then
+            features[node.module_id] = {}
          end
+         features[node.module_id] = node
       end
       for _,feature in ipairs(pop_prop(node, 'if_features') or {}) do
-         local feature_node = lookup_lazy(env, 'features', feature)
-         if node.kind == 'feature' then
+         local feature_node = lookup_lazy(env, 'features', feature, { may_fail = true })
+         if not feature_node then
+            node.unavailable = true
+         elseif node.kind == 'feature' then
             -- This is a feature that depends on a feature.  These we
             -- keep in the environment but if the feature is
             -- unavailable, we mark it as such.
             local mod, id = feature_node.module_id, feature_node.id
             if not (features[mod] or {})[id] then node.unavailable = true end
-         elseif feature_node.unavailable then
+         else
             return nil, env
          end
       end
