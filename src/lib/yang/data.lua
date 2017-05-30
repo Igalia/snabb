@@ -915,5 +915,47 @@ function selftest()
    ]])
    assert(object.summary.shelves_active)
 
+   -- Test if-features.
+   local features_schema = [[module test-schema {
+      namespace "urn:ietf:params:xml:ns:yang:test-schema";
+      prefix "test";
+
+      /* operator-actions depends on parent-feature which is not defined */
+      feature operator-actions {
+         if-feature parent-feature;
+         description "operator-actions";
+      }
+
+      container test {
+         list alarm-summary {
+            leaf severity {
+               type string;
+            }
+            leaf not-cleared-not-closed {
+               if-feature operator-actions;
+                  type string;
+               }
+            }
+         }
+   }]]
+   local loaded_schema = schema.load_schema(features_schema)
+   -- Should crash as not-cleared-not-closed ended up not being defined in the schema.
+   local ok, loaded_data = pcall(load_data_for_schema, loaded_schema, [[
+      test {
+         alarm-summary {
+            severity "low";
+            not-cleared-not-closed "true";
+         }
+      }
+   ]])
+   assert(not ok)
+   load_data_for_schema(loaded_schema, [[
+      test {
+         alarm-summary {
+            severity "low";
+         }
+      }
+   ]])
+
    print('selfcheck: ok')
 end
