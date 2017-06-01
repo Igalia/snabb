@@ -4,6 +4,8 @@ module(..., package.seeall)
 local parser = require("lib.yang.parser")
 local util = require("lib.yang.util")
 
+local keys = util.keys
+
 local function error_with_loc(loc, msg, ...)
    error(string.format("%s: "..msg, loc, ...))
 end
@@ -795,7 +797,8 @@ function resolve(schema, features)
       end
       if node.body then
          node.body = shallow_copy(node.body)
-         for k,v in pairs(node.body or {}) do
+         for _,k in ipairs(keys(node.body)) do
+            local v = node.body[k]
             if v.kind == 'uses' then
                -- Inline "grouping" into "uses".
                local grouping = lookup_lazy(env, 'groupings', v.id)
