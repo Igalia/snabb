@@ -128,14 +128,6 @@ function memoize(f, max_occupancy)
    end
 end
 
-function keys (t)
-   local ret = {}
-   for k, _ in pairs(t) do
-      table.insert(ret, k)
-   end
-   return ret
-end
-
 function selftest()
    print('selftest: lib.yang.util')
    assert(tointeger('0') == 0)

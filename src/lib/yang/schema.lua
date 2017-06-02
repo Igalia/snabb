@@ -4,8 +4,6 @@ module(..., package.seeall)
 local parser = require("lib.yang.parser")
 local util = require("lib.yang.util")
 
-local keys = util.keys
-
 local function error_with_loc(loc, msg, ...)
    error(string.format("%s: "..msg, loc, ...))
 end
@@ -797,21 +795,28 @@ function resolve(schema, features)
       end
       if node.body then
          node.body = shallow_copy(node.body)
-         for _,k in ipairs(keys(node.body)) do
-            local v = node.body[k]
-            if v.kind == 'uses' then
-               -- Inline "grouping" into "uses".
-               local grouping = lookup_lazy(env, 'groupings', v.id)
-               node.body[k] = nil
-               for k,v in pairs(grouping.body) do
-                  assert(not node.body[k], 'duplicate identifier: '..k)
-                  node.body[k] = v
+         repeat
+            local extra, modified = {}, false
+            for k,v in pairs(node.body) do
+               if v.kind == 'uses' then
+                  -- Inline "grouping" into "uses".
+                  local grouping = lookup_lazy(env, 'groupings', v.id)
+                  node.body[k] = nil
+                  for k,v in pairs(grouping.body) do
+                     assert(not extra[k], 'duplicate identifier: '..k)
+                     extra[k] = v
+                  end
+                  -- TODO: Handle refine and augment statements.
+               else
+                  node.body[k] = visit(v, env)
                end
-               -- TODO: Handle refine and augment statements.
-            else
-               node.body[k] = visit(v, env)
             end
-         end
+            for k, v in pairs(extra) do
+               assert(not node.body[k], 'duplicate identifier: '..k)
+               node.body[k] = v
+               modified = true
+            end
+         until not modified
       end
       -- Mark "key" children of lists as being mandatory.
       if node.kind == 'list' and node.key then
