@@ -95,8 +95,16 @@ function types.identityref.tostring(val)
    return val
 end
 
-types['instance-identifier'] = unimplemented('instance-identifier')
-leafref = unimplemented('leafref')
+types["instance-identifier"] = {}
+types["instance-identifier"].parse = function (str, what)
+   -- References are expanded in the validation phase.
+   return assert(str, 'missing value for '..what)
+end
+types["instance-identifier"].tostring = function (val)
+   return val
+end
+
+types.leafref = unimplemented('leafref')
 
 types.string = {}
 function types.string.parse(str, what)
