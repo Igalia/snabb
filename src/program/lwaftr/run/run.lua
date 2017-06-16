@@ -114,7 +114,7 @@ function parse_args(args)
       if opts.virtio_net then
          fatal("setting --ring-buffer-size does not work with --virtio")
       end
-      require("apps.intel.intel10g").ring_buffer_size(ring_buffer_size)
+      opts.ring_buffer_size = ring_buffer_size
    end
    if not conf_file then fatal("Missing required --conf argument.") end
    if opts.mirror then
@@ -162,14 +162,20 @@ function run(args)
    local c = config.new()
    local setup_fn, setup_args
    if opts.virtio_net then
-      setup_fn, setup_args = setup.load_virt, { 'inetNic', 'b4sideNic' }
+      -- setup.load_virt returns nothing!?!
+      -- setup_fn, setup_args = setup.load_virt, { 'inetNic', v4, 'b4sideNic', v6 }
+      setup.load_virt, { 'inetNic', v4, 'b4sideNic', v6 }
    elseif opts["on-a-stick"] then
       setup_fn = setup.load_on_a_stick
       setup_args =
          { { v4_nic_name = 'inetNic', v6_nic_name = 'b4sideNic',
-             v4v6 = use_splitter and 'v4v6', mirror = opts.mirror } }
+             v4v6 = use_splitter and 'v4v6', pciaddr = v4,
+             ndescriptors = opts.ring_buffer_size,
+             mirror = opts.mirror } }
    else
-      setup_fn, setup_args = setup.load_phy, { 'inetNic', 'b4sideNic' }
+      -- setup.load_phy returns nothing!?!
+      -- setup_fn, setup_args = setup.load_phy, { 'inetNic', v4, 'b4sideNic', v6 }
+      setup.load_phy, { 'inetNic', v4, 'b4sideNic', v6 }
    end
 
    if opts.reconfigurable then
@@ -201,8 +207,8 @@ function run(args)
             csv:add_app('v4v6', { 'v4', 'v4' }, { tx=ipv4_tx, rx=ipv4_rx })
             csv:add_app('v4v6', { 'v6', 'v6' }, { tx=ipv6_tx, rx=ipv6_rx })
          else
-            csv:add_app('inetNic', { 'tx', 'rx' }, { tx=ipv4_tx, rx=ipv4_rx })
-            csv:add_app('b4sideNic', { 'tx', 'rx' }, { tx=ipv6_tx, rx=ipv6_rx })
+            csv:add_app('inetNic', { 'output', 'input' }, { tx=ipv4_tx, rx=ipv4_rx })
+            csv:add_app('b4sideNic', { 'output', 'input' }, { tx=ipv6_tx, rx=ipv6_rx })
          end
          csv:activate()
       end
@@ -246,3 +252,4 @@ function run(args)
       engine.main({report={showlinks=true}})
    end
 end
+ring_buffer_size

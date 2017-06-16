@@ -240,8 +240,8 @@ function load_phy(c, conf, v4_nic_name, v6_nic_name)
       rxcounter=1,
       macaddr = ethernet:ntop(queue.internal_interface.mac)})
 
-   link_source(c, v4_nic_name..'.tx', v6_nic_name..'.tx')
-   link_sink(c, v4_nic_name..'.rx', v6_nic_name..'.rx')
+   link_source(c, v4_nic_name..'.output', v6_nic_name..'.output')
+   link_sink(c, v4_nic_name..'.input', v6_nic_name..'.input')
 end
 
 function load_on_a_stick(c, conf, args)
@@ -270,8 +270,8 @@ function load_on_a_stick(c, conf, args)
       else
          config.app(c, v4v6, V4V6)
       end
-      config.link(c, 'nic.tx -> '..v4v6..'.input')
-      config.link(c, v4v6..'.output -> nic.rx')
+      config.link(c, 'nic.output -> '..v4v6..'.input')
+      config.link(c, v4v6..'.output -> nic.input')
 
       link_source(c, v4v6..'.v4', v4v6..'.v6')
       link_sink(c, v4v6..'.v4', v4v6..'.v6')
@@ -287,8 +287,8 @@ function load_on_a_stick(c, conf, args)
          vlan=queue.internal_interface.vlan_tag,
          macaddr = ethernet:ntop(queue.internal_interface.mac)})
 
-      link_source(c, v4_nic_name..'.tx', v6_nic_name..'.tx')
-      link_sink(c, v4_nic_name..'.rx', v6_nic_name..'.rx')
+      link_source(c, v4_nic_name..'.output', v6_nic_name..'.output')
+      link_sink(c, v4_nic_name..'.input', v6_nic_name..'.input')
    end
 end
 
@@ -309,8 +309,8 @@ function load_virt(c, conf, v4_nic_name, v6_nic_name)
       vlan=queue.internal_interface.vlan_tag,
       macaddr = ethernet:ntop(queue.internal_interface.mac)})
 
-   link_source(c, v4_nic_name..'.tx', v6_nic_name..'.tx')
-   link_sink(c, v4_nic_name..'.rx', v6_nic_name..'.rx')
+   link_source(c, v4_nic_name..'.output', v6_nic_name..'.output')
+   link_sink(c, v4_nic_name..'.input', v6_nic_name..'.input')
 end
 
 function load_bench(c, conf, v4_pcap, v6_pcap, v4_sink, v6_sink)
