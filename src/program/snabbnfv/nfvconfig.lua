@@ -122,6 +122,10 @@ function load (file, pciaddr, sockpath, soft_bench)
    return c
 end
 
+function selftest ()
+   return
+end
+
 function selftest_disabled ()
    local pcideva = lib.getenv("SNABB_PCI0")
    if not pcideva then
