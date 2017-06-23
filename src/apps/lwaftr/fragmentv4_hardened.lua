@@ -206,7 +206,7 @@ local function attempt_reassembly(frags_table, reassembly_buf, fragment)
       local o_len = ehs + o_ipv4_total_length
       wr16(reassembly_data + o_len, pkt_len)
       local reassembled_packet = packet.from_pointer(
-	 reassembly_buf.reassembly_data, reassembly_buf.reassembly_length)
+         reassembly_buf.reassembly_data, reassembly_buf.reassembly_length)
       fix_pkt_checksum(reassembled_packet)
       free_reassembly_buf_and_pkt(fragment, frags_table)
       return REASSEMBLY_OK, reassembled_packet

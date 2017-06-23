@@ -427,7 +427,7 @@ function Intel:init_rx_q ()
    assert((self.rxq >=0) and (self.rxq < self.max_q),
    "rxqueue must be in 0.." .. self.max_q-1)
    assert((self.ndesc %128) ==0,
-   "ndesc must be a multiple of 128 (for Rx only)")	-- see 7.1.4.5
+   "ndesc must be a multiple of 128 (for Rx only)")  -- see 7.1.4.5
 
    self.rxqueue = ffi.new("struct packet *[?]", self.ndesc)
    self.rdh = 0
@@ -592,7 +592,7 @@ function Intel:push ()
    end
    -- Reclaim transmit contexts
    local cursor = self.tdh
-   self.tdh = self.r.TDH()	-- possible race condition, 7.2.2.4, check DD
+   self.tdh = self.r.TDH()  -- possible race condition, 7.2.2.4, check DD
    --C.full_memory_barrier()
    while cursor ~= self.tdh do
       if self.txqueue[cursor] then
