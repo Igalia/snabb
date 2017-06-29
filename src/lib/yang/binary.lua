@@ -247,6 +247,11 @@ local function data_emitter(production)
             stream:write_stringref('stringref')
             stream:write_stringref(data)
          end
+      elseif primitive_type == 'empty' then
+         return function (data, stream)
+            stream:write_stringref('stringref')
+            stream:write_stringref('')
+         end
       elseif type.ctype then
          local ctype = type.ctype
          local emit_value = value_emitter(ctype)
@@ -503,6 +508,12 @@ function selftest()
             }
          }
       }
+
+      container foo {
+         leaf enable-qos {
+            type empty;
+         }
+      }
    }]])
    local data = data.load_data_for_schema(test_schema, [[
       is-active true;
@@ -519,6 +530,9 @@ function selftest()
       }
       next-hop {
          ipv4 5.6.7.8;
+      }
+      foo {
+         enable-qos;
       }
    ]])
 
