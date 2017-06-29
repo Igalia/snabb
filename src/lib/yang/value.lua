@@ -83,7 +83,7 @@ function types.empty.parse (str, what)
    return assert(str == nil, "not empty value for "..what)
 end
 function types.empty.tostring (val)
-   return ""
+   return ''
 end
 
 types.identityref = {}
