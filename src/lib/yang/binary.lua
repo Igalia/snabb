@@ -234,7 +234,8 @@ local function data_emitter(production)
          end
       end
    end
-   local native_types = lib.set('enumeration', 'identityref', 'instance-identifier', 'string')
+   local native_types = lib.set('enumeration', 'identityref', 'instance-identifier',
+                                'leafref', 'string')
    function handlers.scalar(production)
       local primitive_type = production.argument_type.primitive_type
       local type = assert(value.types[primitive_type], "unsupported type: "..primitive_type)

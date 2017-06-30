@@ -103,7 +103,13 @@ types['instance-identifier'].tostring = function (val)
    error("NYI: instance-identifier")
 end
 
-types.leafref = unimplemented('leafref')
+types.leafref = {}
+function types.leafref.parse(str, what)
+   return assert(str, 'missing value for '..what)
+end
+function types.leafref.tostring(val)
+   error("NYI: leafref")
+end
 
 types.string = {}
 function types.string.parse(str, what)
