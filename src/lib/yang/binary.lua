@@ -233,13 +233,13 @@ local function data_emitter(production)
          end
       end
    end
-   local native_types = {
-      ['instance-identifier'] = true,
-      leafref = true,
-      enumeration = true,
-      identityref = true,
-      string = true,
-   }
+   local function set (t)
+      local ret = {}
+      for _, k in ipairs(t) do ret[k] = true end
+      return ret
+   end
+   local native_types = set({'enumeration', 'identityref', 'instance-identifier',
+                             'leafref', 'string'})
    function handlers.scalar(production)
       local primitive_type = production.argument_type.primitive_type
       local type = assert(value.types[primitive_type], "unsupported type: "..primitive_type)
