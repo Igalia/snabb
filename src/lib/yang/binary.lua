@@ -235,6 +235,7 @@ local function data_emitter(production)
    end
    local native_types = {
       ['instance-identifier'] = true,
+      leafref = true,
       enumeration = true,
       identityref = true,
       string = true,
