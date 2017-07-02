@@ -219,26 +219,25 @@ local function link_sink(c, v4_out, v6_out)
    config.link(c, 'fragmenterv6.output -> '..v6_out)
 end
 
-function load_phy(c, conf, v4_nic_name, v6_nic_name)
-   local inst_configs = lwutil.produce_instance_configs(conf)
-   local v4_pci, lwaftr_config = next(inst_configs)
-   local queue = lwaftr_config.softwire_config.instance[v4_pci].queue.values[1]
-   local v6_pci = queue.external_interface.device
-   validate_pci_devices({v4_pci, v6_pci})
-   lwaftr_app(c, lwaftr_config, v4_pci)
+function load_phy(c, conf, v4_nic_name, v4_nic_pci, v6_nic_name, v6_nic_pci, ndescriptors)
+   lwaftr_app(c, conf)
+   local external_interface = conf.softwire_config.external_interface
+   local internal_interface = conf.softwire_config.internal_interface
 
    config.app(c, v4_nic_name, Intel82599, {
-      pciaddr=v4_pci,
-      vmdq=queue.external_interface.vlan_tag,
-      vlan=queue.external_interface.vlan_tag,
+      pciaddr=v4_nic_pci,
+      vmdq=true,
+      vlan=external_interface.vlan_tag,
       rxcounter=1,
-      macaddr=ethernet:ntop(queue.external_interface.mac)})
+      ndescriptors=ndescriptors,
+      macaddr=ethernet:ntop(external_interface.mac)})
    config.app(c, v6_nic_name, Intel82599, {
-      pciaddr=v6_pci,
-      vmdq=queue.internal_interface.vlan_tag,
-      vlan=queue.internal_interface.vlan_tag,
+      pciaddr=v6_nic_pci,
+      vmdq=true,
+      vlan=internal_interface.vlan_tag,
       rxcounter=1,
-      macaddr = ethernet:ntop(queue.internal_interface.mac)})
+      ndescriptors=ndescriptors,
+      macaddr=ethernet:ntop(internal_interface.mac)})
 
    link_source(c, v4_nic_name..'.output', v6_nic_name..'.output')
    link_sink(c, v4_nic_name..'.input', v6_nic_name..'.input')
@@ -256,9 +255,10 @@ function load_on_a_stick(c, conf, args)
    if v4v6 then
       config.app(c, 'nic', Intel82599, {
          pciaddr = pciaddr,
-         vmdq=queue.external_interface.vlan_tag,
-         vlan=queue.external_interface.vlan_tag,
-         macaddr = ethernet:ntop(queue.external_interface.mac)})
+         vmdq=true,
+         vlan=external_interface.vlan_tag,
+         ndescriptors=args.ndescriptors,
+         macaddr=ethernet:ntop(external_interface.mac)})
       if mirror then
          local Tap = require("apps.tap.tap").Tap
          local ifname = mirror
