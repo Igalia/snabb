@@ -27,7 +27,6 @@ BENCHMARK_FILENAME = 'benchtest.csv'
 BENCHMARK_PATH = Path.cwd() / BENCHMARK_FILENAME
 
 COMMAND_TIMEOUT = 10
-DAEMON_STARTUP_WAIT = 1
 ENC = 'utf-8'
 
 
@@ -47,6 +46,7 @@ class BaseTestCase(unittest.TestCase):
 
     # Override these.
     daemon_args = ()
+    daemon_startup_wait = 1
 
     # Use setUpClass to only setup the daemon once for all tests.
     @classmethod
@@ -54,7 +54,7 @@ class BaseTestCase(unittest.TestCase):
         if not cls.daemon_args:
             return
         cls.daemon = Popen(cls.daemon_args, stdout=PIPE, stderr=PIPE)
-        time.sleep(DAEMON_STARTUP_WAIT)
+        time.sleep(cls.daemon_startup_wait)
         # Check that the daemon started up correctly.
         ret_code = cls.daemon.poll()
         if ret_code is not None:
