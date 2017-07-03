@@ -102,6 +102,32 @@ local function parse_params(params, required, optional)
    return ret
 end
 
+
+-- This gets 32 bits of salt, which should be enough to prevent accidental
+-- quadratic behaviour when copying a ctable, as described at
+-- http://accidentallyquadratic.tumblr.com/post/153545455987/rust-hash-iteration-reinsertion
+-- Note that this should always be the same number of bits as the hash,
+-- because the hash is scaled to calculate a bucket.
+local function get_random_salt()
+   local function i2b(s, i) -- index to byte
+      return string.byte(s:sub(i, i))
+   end
+   local f = io.open('/dev/urandom', 'rb')
+   local raw_salt = f:read(4)
+   f:close()
+   return i2b(raw_salt, 1) * 0xff0000 + i2b(raw_salt, 2) * 0xff00 +
+          i2b(raw_salt, 3) * 0xff + i2b(raw_salt, 4)
+end
+
+-- Always set the lowest bit to zero, to prevent generating HASH_MAX
+-- The table uses scaling, so setting the high bit would be a bad idea!
+local function compute_salt_hash_fn(salt, f)
+   return function(key)
+         local raw_hash = bit.band(0xfffffff7, bit.bxor(f(key), salt))
+         return tonumber(ffi.cast('uint32_t', raw_hash))
+   end
+end
+
 -- FIXME: For now the value_type option is required, but in the future
 -- we should allow for a nil value type to create a set instead of a
 -- map.
@@ -110,7 +136,8 @@ local optional_params = {
    hash_fn = false,
    initial_size = 8,
    max_occupancy_rate = 0.9,
-   min_occupancy_rate = 0.0
+   min_occupancy_rate = 0.0,
+   salt = false
 }
 
 function new(params)
@@ -118,7 +145,9 @@ function new(params)
    local params = parse_params(params, required_params, optional_params)
    ctab.entry_type = make_entry_type(params.key_type, params.value_type)
    ctab.type = make_entries_type(ctab.entry_type)
-   ctab.hash_fn = params.hash_fn or compute_hash_fn(params.key_type)
+   ctab.raw_hash_fn = params.hash_fn or compute_hash_fn(params.key_type)
+   ctab.salt = params.salt or get_random_salt()
+   ctab.hash_fn = compute_salt_hash_fn(ctab.salt, ctab.raw_hash_fn)
    ctab.equal_fn = make_equal_fn(params.key_type)
    ctab.size = 0
    ctab.max_displacement = 0
@@ -191,6 +220,7 @@ struct {
    uint32_t max_displacement;
    double max_occupancy_rate;
    double min_occupancy_rate;
+   uint32_t salt;
 }
 ]]
 
@@ -198,6 +228,10 @@ function load(stream, params)
    local header = stream:read_ptr(header_t)
    local params_copy = {}
    for k,v in pairs(params) do params_copy[k] = v end
+   -- It is essential that a ctable being loaded has the same salt as the table
+   -- that was originally serialized; if a salt parameter was specified,
+   -- override it. The alternative involves recomputing the whole ctable.
+   params_copy.salt = header.salt
    params_copy.initial_size = header.size
    params_copy.min_occupancy_rate = header.min_occupancy_rate
    params_copy.max_occupancy_rate = header.max_occupancy_rate
@@ -217,7 +251,8 @@ end
 
 function CTable:save(stream)
    stream:write_ptr(header_t(self.size, self.occupancy, self.max_displacement,
-                             self.max_occupancy_rate, self.min_occupancy_rate),
+                             self.max_occupancy_rate, self.min_occupancy_rate,
+                             self.salt),
                     header_t)
    stream:write_array(self.entries,
                       self.entry_type,
@@ -588,8 +623,8 @@ function compute_hash_fn(ctype)
    return hash_fns_by_size[size]
 end
 
-function selftest()
-   print("selftest: ctable")
+local function selftest_aux(salt)
+   print("selftest: ctable", salt)
 
    -- 32-byte entries
    local occupancy = 2e6
@@ -598,7 +633,8 @@ function selftest()
       value_type = ffi.typeof('int32_t[6]'),
       hash_fn = hash_32,
       max_occupancy_rate = 0.4,
-      initial_size = ceil(occupancy / 0.4)
+      initial_size = ceil(occupancy / 0.4),
+      salt = salt
    }
    local ctab = new(params)
    ctab:resize(occupancy / 0.4 + 1)
@@ -613,7 +649,7 @@ function selftest()
    for i=1,2 do
       -- In this case we know max_displacement is 8.  Assert here so that
       -- we can detect any future deviation or regression.
-      assert(ctab.max_displacement == 8)
+      if salt == 0 then assert(ctab.max_displacement == 8) end
 
       ctab:selfcheck()
 
@@ -717,6 +753,11 @@ function selftest()
    check_bytes_equal(ffi.typeof('uint16_t[3]'), {1,1,1}, {1,1,2}) -- 6 byte
    check_bytes_equal(ffi.typeof('uint32_t[2]'), {1,1}, {1,2})     -- 8 byte
    check_bytes_equal(ffi.typeof('uint32_t[3]'), {1,1,1}, {1,1,2}) -- 12 byte
+end
 
+-- Test with both a zero salt and a random salt.
+function selftest()
+   selftest_aux(0)
+   selftest_aux(get_random_salt())
    print("selftest: ok")
 end
