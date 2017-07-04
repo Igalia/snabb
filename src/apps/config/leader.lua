@@ -148,6 +148,45 @@ function Leader:rpc_get_config (args)
    if success then return response else return {status=1, error=response} end
 end
 
+function Leader:rpc_compress_alarms (args)
+   local function getter()
+      if args.schema ~= self.schema_name then
+         return false, ("Compress-alarms operation not supported in"..
+                        "'%s' schema"):format(args.schema)
+      end
+      -- XXX: Implement compress-alarms operation.
+      -- compress-alarms:
+      --   This operation requests the server to compress entries in the
+      --   alarm list by removing all but the latest state change for all
+      --   alarms.  Conditions in the input are logically ANDed.  If no
+      --   input condition is given, all alarms are compressed.
+      local compressed_alarms = 0
+      return { compressed_alarms = compressed_alarms }
+   end
+   local success, response = pcall(getter)
+   if success then return response else return {status=1, error=response} end
+end
+
+function Leader:rpc_purge_alarms (args)
+   local function getter()
+      if args.schema ~= self.schema_name then
+         return false, ("Purge-alarms operation not supported in"..
+                        "'%s' schema"):format(args.schema)
+      end
+      -- XXX: Implement purge-alarms operation.
+      -- purge-alarms:
+      --   This operation requests the server to delete entries from the
+      --   alarm list according to the supplied criteria.  Typically it
+      --   can be used to delete alarms that are in closed operator state
+      --   and older than a specified time.  The number of purged alarms
+      --   is returned as an output parameter
+      local purged_alarms = 0
+      return { purged_alarms = purged_alarms }
+   end
+   local success, response = pcall(getter)
+   if success then return response else return {status=1, error=response} end
+end
+
 local function path_parser_for_grammar(grammar, path)
    local getter, subgrammar = path_mod.resolver(grammar, path)
    return data.data_parser_from_grammar(subgrammar)
