@@ -20,7 +20,7 @@ local action_codec = require("apps.config.action_codec")
 local support = require("apps.config.support")
 local channel = require("apps.config.channel")
 local alarms = require("lib.yang.alarms")
-local alarm_codec = require("lib.config.alarm_codec")
+local alarm_codec = require("apps.config.alarm_codec")
 
 Leader = {
    config = {
@@ -734,8 +734,13 @@ function Leader:receive_alarms_from_followers ()
 end
 
 function Leader:receive_alarms_from_follower (follower)
+   if not follower.alarms_channel then
+      local name = '/'..tostring(follower.pid)..'/alarms-follower-channel'
+      follower.alarms_channel = channel.open(name)
+   end
    local channel = follower.alarms_channel
-   for i=i,4 do
+   alarm_codec.send_pending_alarms(channel)
+   for i=1,4 do
       local buf, len = channel:peek_message()
       if not buf then break end
       local action = alarm_codec.decode(buf, len)

@@ -31,6 +31,20 @@ function decode (buf, len)
    return { name, assert(alarms[name], name)(codec) }
 end
 
+local outgoing_alarm_events = {}
+
+function set_alarm (id)
+   table.insert(outgoing_alarm_events, {'set_alarm', {id}})
+end
+
+function send_pending_alarms (channel)
+   for _,alarm_event in ipairs(outgoing_alarm_events) do
+      local buf, len = encode(alarm_event)
+      channel:put_message(buf, len)
+   end
+   outgoing_alarm_events = {}
+end
+
 function selftest ()
    print('selftest: apps.config.action_codec')
    local lib = require("core.lib")
