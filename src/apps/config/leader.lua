@@ -20,6 +20,7 @@ local action_codec = require("apps.config.action_codec")
 local support = require("apps.config.support")
 local channel = require("apps.config.channel")
 local alarms = require("lib.yang.alarms")
+local alarm_codec = require("lib.config.alarm_codec")
 
 Leader = {
    config = {
@@ -726,11 +727,33 @@ function Leader:send_messages_to_followers()
    end
 end
 
+function Leader:receive_alarms_from_followers ()
+   for _,follower in ipairs(self.followers) do
+      self:receive_alarms_from_follower(follower)
+   end
+end
+
+function Leader:receive_alarms_from_follower (follower)
+   local channel = follower.alarms_channel
+   for i=i,4 do
+      local buf, len = channel:peek_message()
+      if not buf then break end
+      local action = alarm_codec.decode(buf, len)
+      if action[1] == 'commit' then
+         self:commit_pending_actions()
+      else
+         table.insert(self.pending_actions, action)
+      end
+      channel:discard_message(len)
+   end
+end
+
 function Leader:pull ()
    if app.now() < self.next_time then return end
    self.next_time = app.now() + self.period
    self:handle_calls_from_peers()
    self:send_messages_to_followers()
+   self:receive_alarms_from_followers()
 end
 
 function Leader:stop ()
