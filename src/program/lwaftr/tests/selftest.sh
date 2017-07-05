@@ -13,9 +13,9 @@ else
     TEST_WHAT="*"
 fi
 
-# Start discovery from this script's directory, the root of the "tests" subtree,
-# or one of its subdirectories, if passed as first argument to this script.
-# Look for unittests in all files whose name ends with "_test.py".
+# Start discovery from this script's directory, the root of the "tests" subtree.
+# Look for unittests in all files whose name ends with "_test.py", or just one
+# of them, if its prefix (without _test.py) was passed as first argument.
 # List all executed tests, don't show just dots.
 python3 -m unittest discover \
     --start-directory "${TESTS_DIR}" \
