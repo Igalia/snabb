@@ -1,5 +1,7 @@
 module(..., package.seeall)
 
+local S = require("syscall")
+
 local function set (t)
    local ret = {}
    for _, k in ipairs(t) do ret[k] = true end
@@ -40,6 +42,10 @@ end
 function set_alarm (key, params)
    local alarm = Alarm.new(key, params)
    table.insert(alarms.list, alarm)
+end
+
+function set_alarm2 (key, params)
+   print("set_alarm for worker: "..S.getpid())
 end
 
 local function equals_key (key1, key2)
