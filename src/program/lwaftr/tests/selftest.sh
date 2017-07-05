@@ -6,18 +6,18 @@
 export TESTS_DIR=`dirname "$0"`
 export PYTHONPATH=${TESTS_DIR}
 
-# Only run tests in the chosen test file (without the _test.py suffix).
+# Only run tests in the passed subdirectory of $TESTS_DIR.
 if [[ -n $1 ]]; then
-    TEST_WHAT=$1
+    START_DIR=${TESTS_DIR}/$1/
 else
-    TEST_WHAT="*"
+    START_DIR=${TESTS_DIR}
 fi
 
-# Start discovery from this script's directory, the root of the "tests" subtree.
-# Look for unittests in all files whose name ends with "_test.py", or just one
-# of them, if its prefix (without _test.py) was passed as first argument.
+# Start discovery from this script's directory, the root of the "tests" subtree,
+# or one of its subdirectories, if passed as first argument to this script.
+# Look for unittests in all files whose name ends with "_test.py".
 # List all executed tests, don't show just dots.
 python3 -m unittest discover \
-    --start-directory "${TESTS_DIR}" \
-    --pattern "${TEST_WHAT}_test.py" \
+    --start-directory "${START_DIR}" \
+    --pattern "*_test.py" \
     --verbose
