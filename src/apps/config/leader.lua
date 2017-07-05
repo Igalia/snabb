@@ -19,6 +19,7 @@ local app_graph = require("core.config")
 local action_codec = require("apps.config.action_codec")
 local support = require("apps.config.support")
 local channel = require("apps.config.channel")
+local alarms = require("lib.yang.alarms")
 
 Leader = {
    config = {
@@ -154,14 +155,7 @@ function Leader:rpc_compress_alarms (args)
          return false, ("Compress-alarms operation not supported in"..
                         "'%s' schema"):format(args.schema)
       end
-      -- XXX: Implement compress-alarms operation.
-      -- compress-alarms:
-      --   This operation requests the server to compress entries in the
-      --   alarm list by removing all but the latest state change for all
-      --   alarms.  Conditions in the input are logically ANDed.  If no
-      --   input condition is given, all alarms are compressed.
-      local compressed_alarms = 0
-      return { compressed_alarms = compressed_alarms }
+      return { compressed_alarms = alarms.compress_alarms() }
    end
    local success, response = pcall(getter)
    if success then return response else return {status=1, error=response} end
@@ -173,15 +167,7 @@ function Leader:rpc_purge_alarms (args)
          return false, ("Purge-alarms operation not supported in"..
                         "'%s' schema"):format(args.schema)
       end
-      -- XXX: Implement purge-alarms operation.
-      -- purge-alarms:
-      --   This operation requests the server to delete entries from the
-      --   alarm list according to the supplied criteria.  Typically it
-      --   can be used to delete alarms that are in closed operator state
-      --   and older than a specified time.  The number of purged alarms
-      --   is returned as an output parameter
-      local purged_alarms = 0
-      return { purged_alarms = purged_alarms }
+      return { purged_alarms = alarms.purge_alarms() }
    end
    local success, response = pcall(getter)
    if success then return response else return {status=1, error=response} end
