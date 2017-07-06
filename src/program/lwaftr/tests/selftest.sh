@@ -7,7 +7,7 @@ export TESTS_DIR=`dirname "$0"`
 export PYTHONPATH=${TESTS_DIR}
 
 # Only run tests in the chosen test file (without the _test.py suffix).
-if [[ -n $1 ]]; then
+if [[ -n "$1" ]]; then
     TEST_WHAT=$1
 else
     TEST_WHAT="*"
