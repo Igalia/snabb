@@ -154,7 +154,6 @@ function selftest ()
             if l == nil then return end
             while not link.empty(l) do
                local p = link.receive(l)
-               print(name..': ', p.length, ffi.string(p.data, p.length))
                packet.free(p)
             end
          end
