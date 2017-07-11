@@ -760,11 +760,11 @@ end
 
 function Leader:commit_pending_actions ()
    for _, action in ipairs(self.pending_actions) do
-      local method, args = action[1], action[2]
-      if method == 'set_alarm' then
-         print('commit set_alarm')
-      elseif method == 'clear_alarm' then
-         print('commit clear_alarm')
+      local name, args = unpack(action)
+      if name == 'set_alarm' then
+         alarms.set_alarm(name, args)
+      elseif name == 'clear_alarm' then
+         alarms.clear_alarm(name, args)
       end
    end
    self.pending_actions = {}

@@ -89,7 +89,7 @@ function selftest ()
       local decoded = decode(encoded, len)
       assert(lib.equal(alarm, decoded))
    end
-   local id = 'id'
+   local id = "1"
    -- Because lib.equal only returns true when comparing cdata of
    -- exactly the same type, here we have to use uint8_t[?].
    test_alarm({'set_alarm', {id}})

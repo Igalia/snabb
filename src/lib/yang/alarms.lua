@@ -38,14 +38,24 @@ end
 -- Q: What's an alarm?
 -- A: The data associated with an alarm is the data specified in the yang schema.
 
--- to be called by the data plane.
-function set_alarm (key, params)
+-- to be called by the leader.
+function set_alarm (key, args)
+   print('set_alarm')
+   for k, v in pairs(args) do
+      print(k, v)
+   end
+   --[[
    local alarm = Alarm.new(key, params)
    table.insert(alarms.list, alarm)
+   --]]
 end
 
-function set_alarm2 (key, params)
-   print("set_alarm for worker: "..S.getpid())
+-- to be called by the leader.
+function clear_alarm (key, args)
+   print('clear_alarm')
+   for k, v in pairs(args) do
+      print(k, v)
+   end
 end
 
 local function equals_key (key1, key2)
