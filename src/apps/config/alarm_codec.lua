@@ -15,13 +15,12 @@ function alarms.set_alarm (codec, id)
    local id = codec:string(id)
    return codec:finish(id)
 end
-function alarms.commit (codec, id)
-   local id = codec:string(id)
-   return codec:finish(id)
-end
 function alarms.clear_alarm (codec, id)
    local id = codec:string(id)
    return codec:finish(id)
+end
+function alarms.commit (codec)
+   return codec:finish()
 end
 
 function encode (alarm)
