@@ -66,6 +66,7 @@ function Leader:new (conf)
    ret.rpc_handler = rpc.dispatch_handler(ret, 'rpc_')
 
    ret:set_initial_configuration(conf.initial_configuration)
+   ret.pending_actions = {}
 
    return ret
 end
@@ -733,13 +734,17 @@ function Leader:receive_alarms_from_followers ()
    end
 end
 
+function Leader:send_pending_alarms (follower)
+
+end
+
 function Leader:receive_alarms_from_follower (follower)
    if not follower.alarms_channel then
       local name = '/'..tostring(follower.pid)..'/alarms-follower-channel'
       follower.alarms_channel = channel.open(name)
    end
    local channel = follower.alarms_channel
-   alarm_codec.send_pending_alarms(channel)
+   -- self.send_pending_alarms(channel)
    for i=1,4 do
       local buf, len = channel:peek_message()
       if not buf then break end
@@ -751,6 +756,18 @@ function Leader:receive_alarms_from_follower (follower)
       end
       channel:discard_message(len)
    end
+end
+
+function Leader:commit_pending_actions ()
+   for _, action in ipairs(self.pending_actions) do
+      local method, args = action[1], action[2]
+      if method == 'set_alarm' then
+         print('commit set_alarm')
+      elseif method == 'clear_alarm' then
+         print('commit clear_alarm')
+      end
+   end
+   self.pending_actions = {}
 end
 
 function Leader:pull ()

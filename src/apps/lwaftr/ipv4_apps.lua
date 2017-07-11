@@ -16,7 +16,7 @@ local lib = require("core.lib")
 local counter = require("core.counter")
 local link = require("core.link")
 local engine = require("core.app")
-local alarms = require("lib.yang.alarms")
+local alarm_codec = require("apps.config.alarm_codec")
 
 local receive, transmit = link.receive, link.transmit
 local wr16, rd32, wr32 = lwutil.wr16, lwutil.rd32, lwutil.wr32
@@ -146,8 +146,8 @@ function ARP:maybe_send_arp_request (output)
       -- More than 3 attempts to resolve an ARP address, raises an alarm.
       if self.use_alarms then
          if self.nrequests >= self.nrequests_threshold then
-            local alarm_key = { 'arp', 'arp', 'arp' }
-            alarms.set_alarm2(alarm_key)
+            local alarm_key = "1"
+            alarm_codec.set_alarm(alarm_key)
          end
       end
    end
