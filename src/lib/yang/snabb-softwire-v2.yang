@@ -350,6 +350,95 @@ module snabb-softwire-v2 {
         }
       }
     }
+
+    container alarms {
+        description
+            "The top container for this module";
+        container control {
+            description
+                "Configuration to control the alarm behaviour.";
+            leaf max-alarm-status-changes {
+                type union {
+                    type uint16;
+                    type enumeration {
+                        enum infinite {
+                            description
+                                "The status change entries are accumulated
+                                infinitely.";
+                        }
+                    }
+                }
+                default 32;
+                description
+                    "The status-change entries are kept in a circular list
+                    per alarm.  When this number is exceeded, the oldest
+                    status change entry is automatically removed.  If the
+                    value is 'infinite', the status change entries are
+                    accumulated infinitely.";
+            }
+
+            leaf notify-status-changes {
+                type boolean;
+                default false;
+                description
+                    "This leaf controls whether notifications are sent on all
+                    alarm status updates, e.g., updated perceived-severity or
+                    alarm-text.  By default the notifications are only sent
+                    when a new alarm is raised, re-raised after being cleared
+                    and when an alarm is cleared.";
+            }
+            container alarm-shelving {
+                if-feature al:alarm-shelving;
+                description
+                    "This list is used to shelve alarms.  The server will move
+                    any alarms corresponding to the shelving criteria from the
+                    alarms/alarm-list/alarm list to the
+                    alarms/shelved-alarms/shelved-alarm list.  It will also
+                    stop sending notifications for the shelved alarms.  The
+                    conditions in the shelf criteria are logically ANDed.
+                    When the shelving criteria is deleted or changed, the
+                    non-matching alarms MUST appear in the
+                    alarms/alarm-list/alarm list according to the real state.
+                    This means that the instrumentation MUST maintain states
+                    for the shelved alarms.  Alarms that match the criteria
+                        shall have an operator-state 'shelved'.";
+                list shelf {
+                    key shelf-name;
+                    leaf shelf-name {
+                        type string;
+                        description
+                            "An arbitrary name for the alarm shelf.";
+                    }
+                    description
+                        "Each entry defines the criteria for shelving alarms.
+                        Criterias are ANDed.";
+
+                    leaf resource {
+                        type al:resource;
+                        description
+                            "Shelve alarms for this resource.";
+                    }
+                    leaf alarm-type-id {
+                        type al:alarm-type-id;
+                        description
+                            "Shelve alarms for this alarm type identifier.";
+                    }
+                    leaf alarm-type-qualifier {
+                        type al:alarm-type-qualifier;
+                        description
+                            "Shelve alarms for this alarm type qualifier.";
+                    }
+                    leaf description {
+                        type string;
+                        description
+                            "An optional textual description of the shelf.  This
+                            description should include the reason for shelving
+                            these alarms.";
+                    }
+                }
+            }
+        }
+    }
   }
 
   container softwire-state {
@@ -722,90 +811,6 @@ module snabb-softwire-v2 {
     container alarms {
         description
             "The top container for this module";
-        container control {
-            description
-                "Configuration to control the alarm behaviour.";
-            leaf max-alarm-status-changes {
-                type union {
-                    type uint16;
-                    type enumeration {
-                        enum infinite {
-                            description
-                                "The status change entries are accumulated
-                                infinitely.";
-                        }
-                    }
-                }
-                default 32;
-                description
-                    "The status-change entries are kept in a circular list
-                    per alarm.  When this number is exceeded, the oldest
-                    status change entry is automatically removed.  If the
-                    value is 'infinite', the status change entries are
-                    accumulated infinitely.";
-            }
-
-            leaf notify-status-changes {
-                type boolean;
-                default false;
-                description
-                    "This leaf controls whether notifications are sent on all
-                    alarm status updates, e.g., updated perceived-severity or
-                    alarm-text.  By default the notifications are only sent
-                    when a new alarm is raised, re-raised after being cleared
-                    and when an alarm is cleared.";
-            }
-            container alarm-shelving {
-                if-feature al:alarm-shelving;
-                description
-                    "This list is used to shelve alarms.  The server will move
-                    any alarms corresponding to the shelving criteria from the
-                    alarms/alarm-list/alarm list to the
-                    alarms/shelved-alarms/shelved-alarm list.  It will also
-                    stop sending notifications for the shelved alarms.  The
-                    conditions in the shelf criteria are logically ANDed.
-                    When the shelving criteria is deleted or changed, the
-                    non-matching alarms MUST appear in the
-                    alarms/alarm-list/alarm list according to the real state.
-                    This means that the instrumentation MUST maintain states
-                    for the shelved alarms.  Alarms that match the criteria
-                        shall have an operator-state 'shelved'.";
-                list shelf {
-                    key shelf-name;
-                    leaf shelf-name {
-                        type string;
-                        description
-                            "An arbitrary name for the alarm shelf.";
-                    }
-                    description
-                        "Each entry defines the criteria for shelving alarms.
-                        Criterias are ANDed.";
-
-                    leaf resource {
-                        type al:resource;
-                        description
-                            "Shelve alarms for this resource.";
-                    }
-                    leaf alarm-type-id {
-                        type al:alarm-type-id;
-                        description
-                            "Shelve alarms for this alarm type identifier.";
-                    }
-                    leaf alarm-type-qualifier {
-                        type al:alarm-type-qualifier;
-                        description
-                            "Shelve alarms for this alarm type qualifier.";
-                    }
-                    leaf description {
-                        type string;
-                        description
-                            "An optional textual description of the shelf.  This
-                            description should include the reason for shelving
-                            these alarms.";
-                    }
-                }
-            }
-        }
 
         container alarm-inventory {
             config false;
