@@ -8,6 +8,36 @@ local function set (t)
    return ret
 end
 
+local config = {
+   control = nil,
+} 
+
+local state = {
+   alarm_inventory = nil,
+   summary = nil,
+   alarm_list = nil,
+   shelved_alarms = nil,
+}
+
+function init (current_configuration)
+   local softwire_config = current_configuration.softwire_config
+   local softwire_state = current_configuration.softwire_state
+   config.control = softwire_config.alarms.control
+   state.alarm_inventory = softwire_state.alarms.alarm_inventory
+   state.summary = softwire_state.alarms.summary
+   state.alarm_list = softwire_state.alarms.alarm_list
+   state.shelved_alarms = softwire_state.alarms.shelved_alarms
+end
+
+-- Statically create alarm_inventory and alarm_list.
+local alarm_inventory = {
+
+}
+
+-- Summary should be read-only.
+
+-- Shelved-alarms
+
 -- Supported common-alarm-parameters and resource-alarm-parameters.
 local alarm_params = set{'alt_resource', 'impacted_resource',
    'root_cause_resource', 'is_cleared', 'last_changed', 'perceived_severity',
@@ -40,6 +70,8 @@ end
 
 -- to be called by the leader.
 function set_alarm (key, args)
+   -- alarms.list[key] = key
+   config.control.notify_status_changes = false
    print('set_alarm')
    for k, v in pairs(args) do
       print(k, v)
@@ -92,6 +124,7 @@ function purge_alarms ()
    return 0
 end
 
+--[[
 function selftest ()
    local key = {
       resource = 'resource1',
@@ -101,3 +134,67 @@ function selftest ()
    set_alarm(key)
    assert(get_alarm(key))
 end
+--]]
+
+function selftest ()
+   -- Reads lwaftr.conf file.
+   local data = require("lib.yang.data")
+   local conf = [[
+      softwire-config {
+         binding-table {
+            softwire {
+               ipv4 178.79.150.3;
+               psid 4;
+               b4-ipv6 127:14:25:36:47:58:69:128;
+               br-address 1e:2:2:2:2:2:2:af;
+               port-set {
+                  psid-length 6;
+               }
+            }
+         }
+         external-interface {
+            allow-incoming-icmp false;
+            error-rate-limiting {
+               packets 600000;
+            }
+            ip 10.10.10.10;
+            mac 12:12:12:12:12:12;
+            next-hop {
+               mac 68:68:68:68:68:68;
+            }
+            reassembly {
+               max-fragments-per-packet 40;
+            }
+         }
+         internal-interface {
+            allow-incoming-icmp false;
+            error-rate-limiting {
+               packets 600000;
+            }
+            ip 8:9:a:b:c:d:e:f;
+            mac 22:22:22:22:22:22;
+            next-hop {
+               mac 44:44:44:44:44:44;
+            }
+            reassembly {
+               max-fragments-per-packet 40;
+            }
+         }
+         alarms {
+            control {
+               notify-status-changes true;
+            }
+         }
+      }
+      softwire-state {
+         alarms {
+
+         }
+      }
+   ]]
+   local conf = data.load_data_for_schema_by_name('snabb-softwire-v2', conf)
+   assert(conf.softwire_config.alarms.control.notify_status_changes)
+
+   -- Do stuff with the alarm related containers.
+end 
+

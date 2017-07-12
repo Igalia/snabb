@@ -67,6 +67,7 @@ function Leader:new (conf)
 
    ret:set_initial_configuration(conf.initial_configuration)
    ret.pending_actions = {}
+   ret:init_alarms()
 
    return ret
 end
@@ -115,6 +116,10 @@ function Leader:rpc_describe (args)
    return { native_schema = self.schema_name,
             alternate_schema = alternate_schemas,
             capability = schema.get_default_capabilities() }
+end
+
+function Leader:init_alarms ()
+   alarms.init(self.current_configuration)
 end
 
 local function path_printer_for_grammar(grammar, path, opts)
