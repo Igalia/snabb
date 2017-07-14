@@ -225,6 +225,7 @@ local function create_alarm (key, args)
    create_status_change(ret, {alarm.perceived_severity, alarm.alarm_text})
    ret.time_created = ret.last_changed
    ret.is_cleared = args.is_cleared
+   ret.operator_state_change = {}
    state.alarm_list.number_of_alarms = state.alarm_list.number_of_alarms + 1
    return ret
 end
@@ -257,7 +258,37 @@ end
 
 -- to be called by the leader.
 function clear_alarm (key)
-   create_or_update_alarm(key, {is_cleared=true}) 
+   create_or_update_alarm(key, {is_cleared=true})
+end
+
+local function set (t)
+   local ret = {}
+   for _,k in ipairs(t) do ret[k] = true end
+   return ret
+end
+
+local operator_states = set{'none', 'ack', 'closed', 'shelved', 'un-shelved'}
+
+-- to be called by the config leader.
+function set_operator_state (key, args)
+   local alarm = state.alarm_list.alarm[key]
+   if not alarm then
+      -- Return error. Could not locate alarm.
+      return false, 'Set operate state operation failed. Could not locate alarm.'
+   end
+   if not alarm.operator_state_change then
+      alarm.operator_state_change = {}
+   end
+   local time = iso_8601()
+   local operator_state_change = {
+      time = time,
+      operator = args.operator or 'admin',
+      state = assert(args.state and operator_states[args.state],
+                     'Not a valid operator state'),
+      text = args.text,
+   }
+   alarm.operator_state_change[time] = operator_state_change
+   return true, alarm
 end
 
 -- to be called by the config leader.
@@ -393,7 +424,7 @@ function selftest ()
    local alarm = state.alarm_list.alarm[key]
    local last_changed = alarm.last_changed
    local number_of_status_change = table_size(alarm.status_change)
-   raise_alarm(key, {perceived_severity='minor'}) 
+   raise_alarm(key, {perceived_severity='minor'})
    assert(last_changed ~= alarm.last_changed)
    assert(table_size(alarm.status_change) == number_of_status_change + 1)
 
@@ -401,14 +432,14 @@ function selftest ()
    local alarm = state.alarm_list.alarm[key]
    local last_changed = alarm.last_changed
    local number_of_status_change = table_size(alarm.status_change)
-   raise_alarm(key, {perceived_severity='minor'}) 
+   raise_alarm(key, {perceived_severity='minor'})
    assert(last_changed == alarm.last_changed)
    assert(table_size(alarm.status_change) == number_of_status_change)
 
    -- Raise alarm again but changing alarm_text. A new status change is added.
    local alarm = state.alarm_list.alarm[key]
    local number_of_status_change = table_size(alarm.status_change)
-   raise_alarm(key, {alarm_text='new text'}) 
+   raise_alarm(key, {alarm_text='new text'})
    assert(table_size(alarm.status_change) == number_of_status_change + 1)
    assert(alarm.alarm_text == 'new text')
 
@@ -430,6 +461,23 @@ function selftest ()
    assert(alarm.is_cleared)
    assert(table_size(alarm.status_change) == number_of_status_change)
    assert(alarm.last_changed == last_changed)
-  
+
+   -- Set operator state change.
+   assert(table_size(alarm.operator_state_change) == 0)
+   local success, alarm = set_operator_state(key, {state='ack'})
+   assert(success)
+   assert(table_size(alarm.operator_state_change) == 1)
+
+   -- Set operator state change again. Should create a new operator state change.
+   sleep(1)
+   local success, alarm = set_operator_state(key, {state='ack'})
+   assert(success)
+   assert(table_size(alarm.operator_state_change) == 2)
+
+   -- Set operator state change on non existent alarm should fail.
+   local key = alarm_key('none', 'none')
+   local success = set_operator_state(key, {state='ack'})
+   assert(not success)
+
    print("ok")
 end
