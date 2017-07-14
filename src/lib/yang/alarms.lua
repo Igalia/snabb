@@ -230,12 +230,25 @@ local function create_alarm (key, args)
    return ret
 end
 
-local function alarm_key (resource, alarm_type_id, alarm_qualifier)
-   resource = resource or ''
-   alarm_type_id = alarm_type_id or ''
-   alarm_qualifier = alarm_qualifier or ''
-   return {resource=resource, alarm_type_id=alarm_type_id, alarm_qualifier=alarm_qualifier}
-end
+local alarm_key = (function ()
+   local cache = {}
+   return function (resource, alarm_type_id, alarm_qualifier)
+      resource = resource or ''
+      alarm_type_id = alarm_type_id or ''
+      alarm_qualifier = alarm_qualifier or ''
+      if not cache[resource] then 
+         cache[resource] = {}
+      end
+      if not cache[resource][alarm_type_id] then
+         cache[resource][alarm_type_id] = {}
+      end
+      local v = cache[resource][alarm_type_id][alarm_qualifier]
+      if v then return v end
+      v = {resource=resource, alarm_type_id=alarm_type_id, alarm_qualifier=alarm_qualifier}
+      cache[resource][alarm_type_id][alarm_qualifier] = v
+      return v
+   end
+end)()
 
 local function create_or_update_alarm(key, args)
    assert(state.alarm_list.alarm)
@@ -291,13 +304,37 @@ function set_operator_state (key, args)
    return true, alarm
 end
 
+local function compress_alarm(alarm)
+   assert(alarm.status_change)
+   local latest_status_change = alarm.status_change[#alarm.status_change]
+   alarm.status_change = {latest_status_change}
+end
+
+local function alarm_key_matches(key1, resource, alarm_type_id, alarm_qualifier)
+   if resource and resource ~= key1.resource then
+      return false
+   elseif alarm_type_id and alarm_type_id ~= key.alarm_type_id then
+      return false
+   elseif alarm_qualifier and alarm_qualifier ~= key.alarm_qualifier then
+      return false
+   end
+   return true
+end
+
 -- to be called by the config leader.
 --   This operation requests the server to compress entries in the
 --   alarm list by removing all but the latest state change for all
 --   alarms.  Conditions in the input are logically ANDed.  If no
 --   input condition is given, all alarms are compressed.
-function compress_alarms ()
-   return 0
+function compress_alarms (resource, alarm_type_id, alarm_qualifier)
+   local count = 0
+   for k, v in pairs(state.alarm_list.alarm) do
+      if alarm_key_matches(k, resource, alarm_type_id, alarm_qualifier) then
+         compress_alarm(v)
+         count = count + 1
+      end
+   end
+   return count
 end
 
 -- to be called by the config leader.
@@ -478,6 +515,13 @@ function selftest ()
    local key = alarm_key('none', 'none')
    local success = set_operator_state(key, {state='ack'})
    assert(not success)
+
+   -- Compress alarms.
+   local key = alarm_key('external-interface', 'arp-resolution')
+   local alarm = state.alarm_list.alarm[key]
+   assert(table_size(alarm.status_change) == 4)
+   compress_alarms('external-interface')
+   assert(table_size(alarm.status_change) == 1)
 
    print("ok")
 end
