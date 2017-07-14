@@ -21,10 +21,12 @@ require("lib.lua.class")
 
 -- ljsyscall returns error as a cdata instead of a string, and the standard
 -- assert doesn't use tostring on it.
+--[[
 _G.assert = function (v, ...)
    if v then return v, ... end
    error(tostring(... or "assertion failed!"))
 end
+--]]
 
 -- Reserve names that we want to use for global module.
 -- (This way we avoid errors from the 'strict' module.)
