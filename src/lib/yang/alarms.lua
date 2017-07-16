@@ -236,7 +236,7 @@ local alarm_key = (function ()
       resource = resource or ''
       alarm_type_id = alarm_type_id or ''
       alarm_qualifier = alarm_qualifier or ''
-      if not cache[resource] then 
+      if not cache[resource] then
          cache[resource] = {}
       end
       if not cache[resource][alarm_type_id] then
@@ -280,7 +280,7 @@ local function set (t)
    return ret
 end
 
-local operator_states = set{'none', 'ack', 'closed', 'shelved', 'un-shelved'}
+local operator_states = {none=1, ack=2, closed=3, shelved=4, ['un-shelved']=5}
 
 -- to be called by the config leader.
 function set_operator_state (key, args)
@@ -292,12 +292,12 @@ function set_operator_state (key, args)
    if not alarm.operator_state_change then
       alarm.operator_state_change = {}
    end
+   assert(args.state and operator_states[args.state], 'Not a valid operator state')
    local time = iso_8601()
    local operator_state_change = {
       time = time,
       operator = args.operator or 'admin',
-      state = assert(args.state and operator_states[args.state],
-                     'Not a valid operator state'),
+      state = args.state,
       text = args.text,
    }
    alarm.operator_state_change[time] = operator_state_change
@@ -337,18 +337,116 @@ function compress_alarms (resource, alarm_type_id, alarm_qualifier)
    return count
 end
 
+local ages = {seconds=1, minutes=60, hours=3600, days=3600*24, weeks=3600*24*7}
+
+local function sleep(n)
+   os.execute("sleep " .. tonumber(n))
+end
+
+local function parse_iso8601 (date)
+   assert(type(date) == 'string')
+   -- XXX: ISO 8601 can be more complex. We asumme date is always in GTM+0.
+   local pattern = "(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):(%d%d)Z"
+   return assert(date:match(pattern))
+end
+
+local function toseconds (date)
+   if type(date) == 'table' then
+      assert(date.age_spec and date.value, "Not a valid 'older_than' data type")
+      local multiplier = assert(ages[date.age_spec],
+                                "Not a valid 'age_spec' value: "..date.age_spec)
+      return date.value * multiplier
+   elseif type(date) == 'string' then
+      local t = {}
+      t.year, t.month, t.day, t.hour, t.minute, t.second = parse_iso8601(date)
+      return os.time(t)
+   else
+      error('toseconds: Wrong data type')
+   end
+end
+
 -- to be called by the config leader.
 --   This operation requests the server to delete entries from the
 --   alarm list according to the supplied criteria.  Typically it
 --   can be used to delete alarms that are in closed operator state
 --   and older than a specified time.  The number of purged alarms
 --   is returned as an output parameter
-function purge_alarms ()
-   return 0
-end
-
-function sleep(n)
-   os.execute("sleep " .. tonumber(n))
+--
+--  args: {status, older_than, severity, operator_state}
+function purge_alarms (args)
+   local alarms = state.alarm_list.alarm
+   local function purge_alarm (key)
+      alarms[key] = nil
+   end
+   local function by_status (alarm, args)
+      if not args.status then return false end
+      local values = set{'any', 'cleared', 'not-cleared'}
+      assert(values[args.status], 'Not a valid status value: '..args.status)
+      local status = args.status
+      if status == 'any' then return true end
+      if status == 'cleared' then return alarm.is_cleared end
+      if status == 'not-cleared' then return not alarm.is_cleared end
+      return false
+   end
+   local function by_older_than (alarm, args)
+      if not args.older_than then return false end
+      local alarm_time = toseconds(alarm.time_created)
+      local threshold = toseconds(args.older_than)
+      return gmtime() - alarm_time >= threshold
+   end
+   local function by_severity (alarm, args)
+      if not args.severity then return false end
+      local values = {indeterminate=2, minor=3 , warning=4, major=5, critical=6}
+      local function tonumber(severity)
+         return values[severity]
+      end
+      local severity = args.severity
+      assert(type(severity) == 'table' and severity.sev_spec and severity.value,
+             'Not valid severity data type')
+      local sev_spec, value = severity.sev_spec, severity.value
+      value = tonumber(value)
+      local alarm_severity = tonumber(alarm.perceived_severity)
+      local severity, alarm_severity
+      if sev_spec == 'below' then
+         return alarm_severity < severity
+      elseif sev_spec == 'is' then
+         return alarm_severity == severity
+      elseif sev_spec == 'above' then
+         return alarm_severity > severity
+      else
+         error('Not valid sev-spec value: '..sev_spec)
+      end
+      return false
+   end
+   local function by_operator_state (alarm, args)
+      if not args.operator_state then return false end
+      local function tonumber (value)
+         return operator_states[value]
+      end
+      local state, user = args.operator_state.state, args.operator_state.user
+      if state and tonumber(state) == tonumber(alarm.operator_state_state) then
+         return true
+      elseif user and user == alarm.operator_state.user then
+         return true
+      end
+      return false
+   end
+   local filter = {}
+   function filter:apply (alarm, args, fns)
+      for _, fn in ipairs(fns) do
+         if fn(alarm, args) then return true end
+      end
+      return false
+   end
+   local count = 0
+   local fns = {by_status, by_older_than, by_severity, by_operator_state}
+   for key, alarm in pairs(alarms) do
+      if filter:apply(alarm, args, fns) then
+         purge_alarm(key)
+         count = count + 1
+      end
+   end
+   return count
 end
 
 function selftest ()
@@ -522,6 +620,16 @@ function selftest ()
    assert(table_size(alarm.status_change) == 4)
    compress_alarms('external-interface')
    assert(table_size(alarm.status_change) == 1)
+
+   -- Test toseconds.
+   assert(toseconds({age_spec='weeks', value=1}) == 3600*24*7)
+   assert(toseconds('1970-01-01T00:00:00Z') == 0)
+
+   -- Test purge alarms.
+   assert(table_size(state.alarm_list.alarm) == 1)
+   assert(purge_alarms({status = 'any'}) == 1)
+   assert(table_size(state.alarm_list.alarm) == 0)
+   assert(purge_alarms({status = 'any'}) == 0)
 
    print("ok")
 end
