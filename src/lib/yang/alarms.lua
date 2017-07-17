@@ -204,10 +204,11 @@ local function create_status_change_if_needed (alarm, args)
    end
 end
 
-local function flat_copy (src)
+local function flat_copy (src, args)
+   args = args or {}
    local ret = {}
    for k,v in pairs(src) do
-      ret[k] = v
+      ret[k] = args[k] or v
    end
    return ret
 end
@@ -222,7 +223,7 @@ end
 
 local function create_alarm (key, args)
    local alarm = assert(fetch_alarm_from_table(key), 'Not supported alarm')
-   local ret = flat_copy(alarm)
+   local ret = flat_copy(alarm, args)
    create_status_change(ret, {alarm.perceived_severity, alarm.alarm_text})
    ret.time_created = ret.last_changed
    ret.is_cleared = args.is_cleared
@@ -405,9 +406,8 @@ function purge_alarms (args)
       assert(type(severity) == 'table' and severity.sev_spec and severity.value,
              'Not valid severity data type')
       local sev_spec, value = severity.sev_spec, severity.value
-      value = tonumber(value)
+      local severity = tonumber(value)
       local alarm_severity = tonumber(alarm.perceived_severity)
-      local severity, alarm_severity
       if sev_spec == 'below' then
          return alarm_severity < severity
       elseif sev_spec == 'is' then
@@ -631,6 +631,22 @@ function selftest ()
    assert(purge_alarms({status = 'any'}) == 1)
    assert(table_size(state.alarm_list.alarm) == 0)
    assert(purge_alarms({status = 'any'}) == 0)
+
+   local key = alarm_key('external-interface', 'arp-resolution')
+   raise_alarm(key)
+   assert(table_size(state.alarm_list.alarm) == 1)
+   -- Perceived severity of {external-interface, arp-resolution} is 'critical'.
+   assert(purge_alarms({severity={sev_spec='is', value='minor'}}) == 0)
+   assert(purge_alarms({severity={sev_spec='below', value='minor'}}) == 0)
+   assert(purge_alarms({severity={sev_spec='above', value='minor'}}) == 1)
+
+   raise_alarm(key, {perceived_severity='minor'})
+   assert(purge_alarms({severity={sev_spec='is', value='minor'}}) == 1)
+
+   raise_alarm(alarm_key('external-interface', 'arp-resolution'))
+   raise_alarm(alarm_key('internal-interface', 'ndp-resolution'))
+   assert(table_size(state.alarm_list.alarm) == 2)
+   assert(purge_alarms({severity={sev_spec='above', value='minor'}}) == 2)
 
    print("ok")
 end
