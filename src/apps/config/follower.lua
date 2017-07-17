@@ -11,6 +11,7 @@ local shm = require("core.shm")
 local app_graph = require("core.config")
 local channel = require("apps.config.channel")
 local action_codec = require("apps.config.action_codec")
+local alarm_codec = require('apps.config.alarm_codec')
 
 Follower = {
    config = {

@@ -6,12 +6,16 @@ local codec = require("apps.config.codec")
 local action_names = { 'unlink_output', 'unlink_input', 'free_link',
                        'new_link', 'link_output', 'link_input', 'stop_app',
                        'start_app', 'reconfig_app',
-                       'call_app_method_with_blob', 'commit' }
+                       'call_app_method_with_blob', 'send_pending_alarms',
+                       'commit' }
 local action_codes = {}
 for i, name in ipairs(action_names) do action_codes[name] = i end
 
 local actions = {}
 
+function actions.send_pending_alarms (codec)
+   return codec:finish()
+end
 function actions.unlink_output (codec, appname, linkname)
    local appname = codec:string(appname)
    local linkname = codec:string(linkname)

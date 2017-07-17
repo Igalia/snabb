@@ -145,7 +145,8 @@ end
 
 -- to be called by the leader.
 function set_alarm (key, args)
-   print('set_alarm')
+   local id = unpack(args)
+   print('set_alarm: '..id)
 end
 
 local function gmtime ()

@@ -66,7 +66,7 @@ function Leader:new (conf)
    ret.rpc_handler = rpc.dispatch_handler(ret, 'rpc_')
 
    ret:set_initial_configuration(conf.initial_configuration)
-   ret.pending_actions = {}
+   ret.pending_alarms = {}
    ret:init_alarms()
 
    return ret
@@ -740,39 +740,41 @@ function Leader:receive_alarms_from_followers ()
 end
 
 function Leader:send_pending_alarms (follower)
-
+   if follower.channel then
+      local channel = follower.channel
+      local action = {'send_pending_alarms',{}}
+      local buf, len = action_codec.encode(action)
+      channel:put_message(buf, len)
+      buf, len = action_codec.encode({'commit', {}})
+      channel:put_message(buf, len)
+   end
 end
 
 function Leader:receive_alarms_from_follower (follower)
    if not follower.alarms_channel then
       local name = '/'..tostring(follower.pid)..'/alarms-follower-channel'
-      follower.alarms_channel = channel.open(name)
+      local success, channel = pcall(channel.open, name)
+      if not success then return end
+      follower.alarms_channel = channel
    end
    local channel = follower.alarms_channel
-   -- self.send_pending_alarms(channel)
-   for i=1,4 do
+   while true do
       local buf, len = channel:peek_message()
       if not buf then break end
-      local action = alarm_codec.decode(buf, len)
-      if action[1] == 'commit' then
-         self:commit_pending_actions()
-      else
-         table.insert(self.pending_actions, action)
-      end
+      local alarm = alarm_codec.decode(buf, len)
+      self:handle_alarm(follower, alarm)
       channel:discard_message(len)
    end
 end
 
-function Leader:commit_pending_actions ()
-   for _, action in ipairs(self.pending_actions) do
-      local name, args = unpack(action)
-      if name == 'set_alarm' then
-         alarms.set_alarm(name, args)
-      elseif name == 'clear_alarm' then
-         alarms.clear_alarm(name, args)
-      end
+function Leader:handle_alarm (follower, alarm)
+   local name, args = unpack(alarm)
+   if name == 'set_alarm' then
+      alarms.set_alarm(name, args)
    end
-   self.pending_actions = {}
+   if name == 'clear_alarm' then
+      alarms.clear_alarm(name, args)
+   end
 end
 
 function Leader:pull ()
