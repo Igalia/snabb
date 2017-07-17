@@ -184,6 +184,8 @@ local function create_status_change (alarm, args)
       alarm.status_change = {}
    end
    table.insert(alarm.status_change, status)
+   -- alarm.last_change must be equals to the most recent status change.
+   alarm.last_changed = status.time
 end
 
 -- The following state changes creates an entry in this list:
@@ -225,7 +227,7 @@ local function create_alarm (key, args)
    local alarm = assert(fetch_alarm_from_table(key), 'Not supported alarm')
    local ret = flat_copy(alarm, args)
    create_status_change(ret, {alarm.perceived_severity, alarm.alarm_text})
-   ret.time_created = ret.last_changed
+   ret.time_created = assert(ret.last_changed)
    ret.is_cleared = args.is_cleared
    ret.operator_state_change = {}
    state.alarm_list.number_of_alarms = state.alarm_list.number_of_alarms + 1
@@ -363,7 +365,7 @@ local function toseconds (date)
       t.year, t.month, t.day, t.hour, t.minute, t.second = parse_iso8601(date)
       return os.time(t)
    else
-      error('toseconds: Wrong data type')
+      error('Wrong data type: '..type(date))
    end
 end
 
@@ -392,7 +394,9 @@ function purge_alarms (args)
    end
    local function by_older_than (alarm, args)
       if not args.older_than then return false end
+      print("alarm.time_created: "..alarm.time_created)
       local alarm_time = toseconds(alarm.time_created)
+      print("args.oldern_than")
       local threshold = toseconds(args.older_than)
       return gmtime() - alarm_time >= threshold
    end
@@ -647,6 +651,10 @@ function selftest ()
    raise_alarm(alarm_key('internal-interface', 'ndp-resolution'))
    assert(table_size(state.alarm_list.alarm) == 2)
    assert(purge_alarms({severity={sev_spec='above', value='minor'}}) == 2)
+
+   raise_alarm(key)
+   sleep(1)
+   print(purge_alarms({older_than={age_spec='seconds', value='1'}}))
 
    print("ok")
 end
