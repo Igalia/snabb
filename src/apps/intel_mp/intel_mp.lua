@@ -426,7 +426,7 @@ function Intel:init_rx_q ()
    if not self.rxq then return end
    assert((self.rxq >=0) and (self.rxq < self.max_q),
    "rxqueue must be in 0.." .. self.max_q-1)
-   assert((self.ndesc %128) ==0,
+   assert((self.ndesc %128) == 0,
    "ndesc must be a multiple of 128 (for Rx only)")  -- see 7.1.4.5
 
    self.rxqueue = ffi.new("struct packet *[?]", self.ndesc)
