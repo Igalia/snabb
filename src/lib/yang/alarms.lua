@@ -163,29 +163,30 @@ local function iso_8601 (time)
    return os.date("%Y-%m-%dT%H:%M:%SZ", time)
 end
 
-local function update_alarm (alarm, args)
-   alarm.last_changed = args.time
-   alarm.perceived_severity = args.perceived_severity
-   alarm.alarm_text = args.alarm_text
-   alarm.is_cleared = args.is_cleared
-   state.alarm_list.last_changed = args.time
-end
-
 -- The entry with latest time-stamp in this list MUST correspond to the leafs
 -- 'is-cleared', 'perceived-severity' and 'alarm-text' for the alarm.
 -- The time-stamp for that entry MUST be equal to the 'last-changed' leaf.
-local function create_status_change (alarm, args)
-   local status = {
-      time = args.time,
-      perceived_severity = args.perceived_severity,
-      alarm_text = args.alarm_text,
-   }
+local function create_status_change (alarm, status)
    if not alarm.status_change then
       alarm.status_change = {}
    end
-   table.insert(alarm.status_change, status)
-   -- alarm.last_change must be equals to the most recent status change.
+   alarm.perceived_severity = status.perceived_severity
+   alarm.alarm_text = status.alarm_text
    alarm.last_changed = status.time
+   state.alarm_list.last_changed = status.time
+   table.insert(alarm.status_change, status)
+end
+
+local function new_status_change (alarm, args)
+   if alarm.is_cleared ~= args.is_cleared then
+      return true
+   elseif args.perceived_severity and
+          alarm.perceived_severity ~= args.perceived_severity then
+      return true
+   elseif args.alarm_text and alarm.alarm_text ~= args.alarm_text then
+      return true
+   end
+   return false
 end
 
 -- The following state changes creates an entry in this list:
@@ -193,16 +194,14 @@ end
 --   - clearance status, this also updates the 'is-cleared' leaf
 --   - alarm text update
 local function create_status_change_if_needed (alarm, args)
-   local new_status_change = false
-   args.perceived_severity = args.perceived_severity or alarm.perceived_severity
-   args.alarm_text = args.alarm_text or alarm.alarm_text
-   new_status_change = alarm.is_cleared ~= args.is_cleared or
-                       alarm.perceived_severity ~= args.perceived_severity or
-                       alarm.alarm_text ~= args.alarm_text
-   if new_status_change then
-      args.time = iso_8601()
-      create_status_change(alarm, args)
-      update_alarm(alarm, args)
+   if new_status_change(alarm, args) then
+      local status = {
+         time = iso_8601(),
+         perceived_severity = args.perceived_severity or alarm.perceived_severity,
+         alarm_text = args.alarm_text or alarm.alarm_text,
+      }
+      create_status_change(alarm, status)
+      alarm.is_cleared = args.is_cleared
    end
 end
 
@@ -226,7 +225,13 @@ end
 local function create_alarm (key, args)
    local alarm = assert(fetch_alarm_from_table(key), 'Not supported alarm')
    local ret = flat_copy(alarm, args)
-   create_status_change(ret, {alarm.perceived_severity, alarm.alarm_text})
+   local status = {
+      time = iso_8601(),
+      perceived_severity = args.perceived_severity or ret.perceived_severity,
+      alarm_text = args.alarm_text or ret.alarm_text,
+   }
+   create_status_change(ret, status)
+   ret.last_changed = assert(status.time)
    ret.time_created = assert(ret.last_changed)
    ret.is_cleared = args.is_cleared
    ret.operator_state_change = {}
@@ -394,9 +399,7 @@ function purge_alarms (args)
    end
    local function by_older_than (alarm, args)
       if not args.older_than then return false end
-      print("alarm.time_created: "..alarm.time_created)
       local alarm_time = toseconds(alarm.time_created)
-      print("args.oldern_than")
       local threshold = toseconds(args.older_than)
       return gmtime() - alarm_time >= threshold
    end
@@ -426,13 +429,17 @@ function purge_alarms (args)
    local function by_operator_state (alarm, args)
       if not args.operator_state then return false end
       local function tonumber (value)
-         return operator_states[value]
+         return value and operator_states[value]
       end
       local state, user = args.operator_state.state, args.operator_state.user
-      if state and tonumber(state) == tonumber(alarm.operator_state_state) then
-         return true
-      elseif user and user == alarm.operator_state.user then
-         return true
+      if state or user then
+         for _, state_change in pairs(alarm.operator_state_change or {}) do
+            if state and tonumber(state_change.state) == tonumber(state) then
+               return true
+            elseif user and state_change.user == user then
+               return true
+            end
+         end
       end
       return false
    end
@@ -599,7 +606,8 @@ function selftest ()
    assert(alarm.is_cleared)
    clear_alarm(key)
    assert(alarm.is_cleared)
-   assert(table_size(alarm.status_change) == number_of_status_change)
+   assert(table_size(alarm.status_change) == number_of_status_change,
+          table_size(alarm.status_change).." == "..number_of_status_change)
    assert(alarm.last_changed == last_changed)
 
    -- Set operator state change.
@@ -630,16 +638,22 @@ function selftest ()
    assert(toseconds({age_spec='weeks', value=1}) == 3600*24*7)
    assert(toseconds('1970-01-01T00:00:00Z') == 0)
 
-   -- Test purge alarms.
+   -- Purge alarms by status.
    assert(table_size(state.alarm_list.alarm) == 1)
    assert(purge_alarms({status = 'any'}) == 1)
    assert(table_size(state.alarm_list.alarm) == 0)
    assert(purge_alarms({status = 'any'}) == 0)
 
+   -- Purge alarms filtering by older_than.
+   local key = alarm_key('external-interface', 'arp-resolution')
+   raise_alarm(key)
+   sleep(1)
+   assert(purge_alarms({older_than={age_spec='seconds', value='1'}}) == 1)
+
+   -- Purge alarms by severity.
    local key = alarm_key('external-interface', 'arp-resolution')
    raise_alarm(key)
    assert(table_size(state.alarm_list.alarm) == 1)
-   -- Perceived severity of {external-interface, arp-resolution} is 'critical'.
    assert(purge_alarms({severity={sev_spec='is', value='minor'}}) == 0)
    assert(purge_alarms({severity={sev_spec='below', value='minor'}}) == 0)
    assert(purge_alarms({severity={sev_spec='above', value='minor'}}) == 1)
@@ -652,9 +666,14 @@ function selftest ()
    assert(table_size(state.alarm_list.alarm) == 2)
    assert(purge_alarms({severity={sev_spec='above', value='minor'}}) == 2)
 
+   -- Purge alarms by operator_state.
+   local key = alarm_key('external-interface', 'arp-resolution')
    raise_alarm(key)
-   sleep(1)
-   print(purge_alarms({older_than={age_spec='seconds', value='1'}}))
+   assert(table_size(state.alarm_list.alarm) == 1)
+   local success, alarm = set_operator_state(key, {state='ack'})
+   assert(success)
+   assert(table_size(alarm.operator_state_change) == 1)
+   assert(purge_alarms({operator_state={state='ack'}}) == 1)
 
    print("ok")
 end
