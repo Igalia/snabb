@@ -29,20 +29,20 @@ end)()
 -- An alarm key is a tuple fored by {resource, alarm_type_id, alarm_type_qualifier}.
 local alarm_key = (function ()
    local cache = {}
-   return function (resource, alarm_type_id, alarm_qualifier)
+   return function (resource, alarm_type_id, alarm_type_qualifier)
       resource = resource or ''
       alarm_type_id = alarm_type_id or ''
-      alarm_qualifier = alarm_qualifier or ''
+      alarm_type_qualifier = alarm_type_qualifier or ''
       if not cache[resource] then
          cache[resource] = {}
       end
       if not cache[resource][alarm_type_id] then
          cache[resource][alarm_type_id] = {}
       end
-      local v = cache[resource][alarm_type_id][alarm_qualifier]
+      local v = cache[resource][alarm_type_id][alarm_type_qualifier]
       if v then return v end
-      v = {resource=resource, alarm_type_id=alarm_type_id, alarm_qualifier=alarm_qualifier}
-      cache[resource][alarm_type_id][alarm_qualifier] = v
+      v = {resource=resource, alarm_type_id=alarm_type_id, alarm_type_qualifier=alarm_type_qualifier}
+      cache[resource][alarm_type_id][alarm_type_qualifier] = v
       return v
    end
 end)()
@@ -245,7 +245,7 @@ end
 
 local function create_or_update_alarm(key, args)
    assert(state.alarm_list.alarm)
-   assert(key.resource and key.alarm_type_id and key.alarm_qualifier)
+   assert(key.resource and key.alarm_type_id and key.alarm_type_qualifier)
    assert(args and args.is_cleared ~= nil)
    local alarm = state.alarm_list.alarm[key]
    if not alarm then
@@ -303,12 +303,12 @@ local function compress_alarm(alarm)
    alarm.status_change = {latest_status_change}
 end
 
-local function alarm_key_matches(key1, resource, alarm_type_id, alarm_qualifier)
+local function alarm_key_matches(key1, resource, alarm_type_id, alarm_type_qualifier)
    if resource and resource ~= key1.resource then
       return false
    elseif alarm_type_id and alarm_type_id ~= key.alarm_type_id then
       return false
-   elseif alarm_qualifier and alarm_qualifier ~= key.alarm_qualifier then
+   elseif alarm_type_qualifier and alarm_type_qualifier ~= key.alarm_type_qualifier then
       return false
    end
    return true
@@ -319,10 +319,10 @@ end
 --   alarm list by removing all but the latest state change for all
 --   alarms.  Conditions in the input are logically ANDed.  If no
 --   input condition is given, all alarms are compressed.
-function compress_alarms (resource, alarm_type_id, alarm_qualifier)
+function compress_alarms (resource, alarm_type_id, alarm_type_qualifier)
    local count = 0
    for k, v in pairs(state.alarm_list.alarm) do
-      if alarm_key_matches(k, resource, alarm_type_id, alarm_qualifier) then
+      if alarm_key_matches(k, resource, alarm_type_id, alarm_type_qualifier) then
          compress_alarm(v)
          count = count + 1
       end
