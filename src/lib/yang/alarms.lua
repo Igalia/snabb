@@ -2,9 +2,7 @@ module(..., package.seeall)
 
 local S = require("syscall")
 
-local config = {
-   control = nil,
-}
+local config = {}
 
 local state = {
    alarm_inventory = nil,
@@ -12,6 +10,42 @@ local state = {
    alarm_list = nil,
    shelved_alarms = nil,
 }
+
+-- An alarm_type key is a tuple formed by {alarm_type_id, alarm_type_qualifier}.
+local alarm_type_key = (function ()
+   local cache = {}
+   return function (alarm_type_id, alarm_type_qualifier)
+      if not cache.alarm_type_id then
+         cache[alarm_type_id] = {}
+      end
+      local key = cache[alarm_type_id][alarm_type_qualifier]
+      if key then return key end
+      key = {alarm_type_id=alarm_type_id, alarm_type_qualifier=alarm_type_qualifier}
+      cache[alarm_type_id][alarm_type_qualifier] = key
+      return key
+   end
+end)()
+
+-- An alarm key is a tuple fored by {resource, alarm_type_id, alarm_type_qualifier}.
+local alarm_key = (function ()
+   local cache = {}
+   return function (resource, alarm_type_id, alarm_qualifier)
+      resource = resource or ''
+      alarm_type_id = alarm_type_id or ''
+      alarm_qualifier = alarm_qualifier or ''
+      if not cache[resource] then
+         cache[resource] = {}
+      end
+      if not cache[resource][alarm_type_id] then
+         cache[resource][alarm_type_id] = {}
+      end
+      local v = cache[resource][alarm_type_id][alarm_qualifier]
+      if v then return v end
+      v = {resource=resource, alarm_type_id=alarm_type_id, alarm_qualifier=alarm_qualifier}
+      cache[resource][alarm_type_id][alarm_qualifier] = v
+      return v
+   end
+end)()
 
 -- Static alarm_inventory list.
 local alarm_inventory_table = {
@@ -47,66 +81,36 @@ local alarm_list_table = {
    },
 }
 
-local function add_row_to_alarm_inventory (alarm_inventory, row)
-   if not alarm_inventory.alarm_type then alarm_inventory.alarm_type = {} end
-   local alarm_type = alarm_inventory.alarm_type
-   local key = {alarm_type_id=row.alarm_type_id,alarm_type_qualifier=row.alarm_type_qualifier}
-   if not alarm_type[key] then
-      local value = {
-         alarm_type_id=row.alarm_type_id,
-         alarm_type_qualifier=row.alarm_type_qualifier,
-         resource=row.resource,
-         has_clear=row.has_clear,
-         description=row.description,
+local function init (current_configuration)
+   -- The alarms inventory is always initialized with a predefined list of 
+   -- alarm types.
+   local function init_alarm_inventory ()
+      local alarm_type = {}
+      for _, row in ipairs(alarm_inventory_table) do
+         local key = alarm_type_key(row.alarm_type_id, row.alarm_type_qualifier)
+         if not alarm_type[key] then
+            alarm_type[key] = {
+               alarm_type_id=row.alarm_type_id,
+               alarm_type_qualifier=row.alarm_type_qualifier,
+               resource=row.resource,
+               has_clear=row.has_clear,
+               description=row.description,
+            }
+         end
+      end
+      return { alarm_type = alarm_type }
+   end
+   config = current_configuration.softwire_config.alarms.control
+   state = {
+      alarm_inventory = init_alarm_inventory(),
+      alarm_list = {
+         number_of_alarms = 0,
+         alarm = {},
       }
-      alarm_type[key] = value
-   end
+   }
 end
 
--- The alarms inventory is always initialized with a preset of alarm inventory
--- The reason is that it doesn't really matter is an user defines new alarm
--- types in a configuration.  The system will only rises a predefined set of
--- alarms.  For the same reason, there's an static list of alarms.
-local function load_alarm_inventory (alarm_inventory, t)
-   assert(alarm_inventory)
-   for _, row in ipairs(t) do
-      add_row_to_alarm_inventory(alarm_inventory, row)
-   end
-end
-
-local function table_size (t)
-   local ret = 0
-   for _ in pairs(t) do ret = ret + 1 end
-   return ret
-end
-
-local function init_alarm_inventory (alarms)
-   alarms.alarm_inventory = {}
-   state.alarm_inventory = alarms.alarm_inventory
-   load_alarm_inventory(state.alarm_inventory, alarm_inventory_table)
-end
-
-local function set_if_empty (t, f, v)
-   t[f] = t[f] or v
-end
-
-local function init_alarm_list (alarms)
-   alarms.alarm_list = alarms.alarm_list or {}
-   alarms.alarm_list.alarm = alarms.alarm_list.alarm or {}
-   state.alarm_list = alarms.alarm_list
-   set_if_empty(state.alarm_list, 'number_of_alarms', 0)
-end
-
-function init (current_configuration)
-   local softwire_config = current_configuration.softwire_config
-   local softwire_state = current_configuration.softwire_state
-   config.control = softwire_config.alarms.control
-   init_alarm_inventory(softwire_state.alarms)
-   state.summary = softwire_state.alarms.summary
-   init_alarm_list(softwire_state.alarms)
-   state.shelved_alarms = softwire_state.alarms.shelved_alarms
-end
-
+-- Helper function for pretty printing a table.
 local function pp(t, indent)
    indent = indent or ''
    for k,v in pairs(t) do
@@ -238,26 +242,6 @@ local function create_alarm (key, args)
    state.alarm_list.number_of_alarms = state.alarm_list.number_of_alarms + 1
    return ret
 end
-
-local alarm_key = (function ()
-   local cache = {}
-   return function (resource, alarm_type_id, alarm_qualifier)
-      resource = resource or ''
-      alarm_type_id = alarm_type_id or ''
-      alarm_qualifier = alarm_qualifier or ''
-      if not cache[resource] then
-         cache[resource] = {}
-      end
-      if not cache[resource][alarm_type_id] then
-         cache[resource][alarm_type_id] = {}
-      end
-      local v = cache[resource][alarm_type_id][alarm_qualifier]
-      if v then return v end
-      v = {resource=resource, alarm_type_id=alarm_type_id, alarm_qualifier=alarm_qualifier}
-      cache[resource][alarm_type_id][alarm_qualifier] = v
-      return v
-   end
-end)()
 
 local function create_or_update_alarm(key, args)
    assert(state.alarm_list.alarm)
@@ -461,6 +445,12 @@ function purge_alarms (args)
    return count
 end
 
+local function table_size (t)
+   local ret = 0
+   for _ in pairs(t) do ret = ret + 1 end
+   return ret
+end
+
 function selftest ()
    print("selftest: lib.yang.alarms")
 
@@ -537,11 +527,11 @@ function selftest ()
 
    -- Init.
    init(conf)
-   assert(conf.softwire_config.alarms.control == config.control)
-   assert(conf.softwire_state.alarms.alarm_inventory == state.alarm_inventory)
-   assert(conf.softwire_state.alarms.summary == state.summary)
-   assert(conf.softwire_state.alarms.alarm_list == state.alarm_list)
-   assert(conf.softwire_state.alarms.shelved_alarms == state.shelved_alarms)
+   assert(config == conf.softwire_config.alarms.control)
+   assert(type(state.alarm_inventory) == 'table') 
+   assert(type(state.alarm_inventory.alarm_type) == 'table') 
+   assert(type(state.alarm_list) == 'table') 
+   assert(type(state.alarm_list.alarm) == 'table') 
 
    -- Check alarm inventory has been loaded.
    assert(table_size(state.alarm_inventory.alarm_type) == 2)
