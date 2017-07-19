@@ -580,7 +580,7 @@ function Leader:rpc_get_state (args)
       local printer = path_printer_for_schema_by_name(self.schema_name, args.path, args)
       local s = {}
       for _, follower in pairs(self.followers) do
-         for k,v in pairs(state.show_state(self.schema_name, follower.pid, args.path)) do
+         for k,v in pairs(state.show_state(self.schema_name, follower.pid)) do
             s[k] = v
          end
       end
