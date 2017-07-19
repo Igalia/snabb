@@ -5,7 +5,6 @@ local lib = require("core.lib")
 local shm = require("core.shm")
 local yang = require("lib.yang.yang")
 local yang_data = require("lib.yang.data")
-local counter = require("core.counter")
 
 local counter_directory = "/apps"
 
@@ -22,7 +21,7 @@ local function flatten(val)
    return rtn
 end
 
-function find_counters(pid)
+local function find_counters(pid)
    local path = shm.root.."/"..pid..counter_directory
    local apps = {}
    for _, c in pairs(lib.files_in_directory(path)) do
@@ -38,7 +37,7 @@ function find_counters(pid)
    return apps
 end
 
-function collect_state_leaves(schema)
+local function collect_state_leaves(schema)
    -- Iterate over schema looking fo state leaves at a specific path into the
    -- schema. This should return a dictionary of leaf to lua path.
    local function collection(scm, path)
