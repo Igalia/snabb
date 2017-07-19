@@ -48,6 +48,15 @@ function encoder()
    function encoder:uint32(len)
       table.insert(self.out, ffi.new('uint32_t[1]', len))
    end
+   function encoder:table (t)
+      local _type, len = ducktype(t)
+      self:uint32(len)
+      local buf = ffi.new(_type)
+      for k, v in pairs(t) do
+         buf[k] = tostring(v)
+      end
+      table.insert(self.out, buf)
+   end
    function encoder:string(str)
       self:uint32(#str)
       local buf = ffi.new('uint8_t[?]', #str)
@@ -63,16 +72,20 @@ function encoder()
       self:string(require_path)
       self:string(name)
    end
-   function encoder:config(class, arg)
+   function encoder:table (t)
       local file_name = random_file_name()
+      binary.compile_ad_hoc_lua_data_to_file(file_name, t)
+      self:string(file_name)
+   end
+   function encoder:config(class, arg)
       if class.yang_schema then
+         local file_name = random_file_name()
          yang.compile_data_for_schema_by_name(class.yang_schema, arg,
                                               file_name)
+         return self:string(file_name)
       else
-         if arg == nil then arg = {} end
-         binary.compile_ad_hoc_lua_data_to_file(file_name, arg)
+         return self:table(arg or {})
       end
-      self:string(file_name)
    end
    function encoder:finish()
       local size = 0
@@ -115,6 +128,9 @@ function decoder(buf, len)
       return assert(require(require_path)[name])
    end
    function decoder:config()
+      return self:table()
+   end
+   function decoder:table()
       return binary.load_compiled_data_file(self:string()).data
    end
    function decoder:finish(...)
