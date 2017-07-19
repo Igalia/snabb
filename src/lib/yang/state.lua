@@ -109,6 +109,29 @@ function show_state(scm, pid, raw_path)
     return data
 end
 
+local alarms = require('lib.yang.alarms')
+local alarms_state = alarms.get_alarms_state()
+
+local function collect_alarm_list()
+   local alarm_list = alarms_state.alarm_list
+end
+local function collect_alarm_inventory()
+
+end
+local function collect_alarm_summary()
+
+end
+local function collect_alarm_shelves()
+
+end
+
+local function collect_alarms ()
+   collect_alarm_list()
+   collect_alarm_inventory()
+   collect_alarm_summary()
+   collect_alarm_shelves()
+end
+
 function selftest ()
    print("selftest: lib.yang.state")
    local simple_router_schema_src = [[module snabb-simple-router {

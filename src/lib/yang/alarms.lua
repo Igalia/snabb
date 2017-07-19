@@ -11,6 +11,10 @@ local state = {
    shelved_alarms = nil,
 }
 
+local function get_alarms_state ()
+   return alarms.state()
+end
+
 -- Cache of alarm keys.
 local alarm_keys = {}
 
