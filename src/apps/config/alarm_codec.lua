@@ -4,21 +4,24 @@ module(...,package.seeall)
 local S = require("syscall")
 local channel = require("apps.config.channel")
 local codec = require("apps.config.codec")
+local alarm_model = require("lib.yang.alarms")
 
-local alarm_names = { 'set_alarm', 'clear_alarm' }
+local alarm_names = { 'raise_alarm', 'clear_alarm' }
 local alarm_codes = {}
 for i, name in ipairs(alarm_names) do alarm_codes[name] = i end
 
 local verbose = false
 local alarms = {}
 
-function alarms.set_alarm (codec, id)
-   local id = codec:string(id)
-   return codec:finish(id)
+function alarms.raise_alarm (codec, key, args)
+   key = codec:table(key)
+   args = codec:table(args)
+   return codec:finish(key, args)
 end
-function alarms.clear_alarm (codec, id)
-   local id = codec:string(id)
-   return codec:finish(id)
+function alarms.clear_alarm (codec, key, args)
+   key = codec:table(key)
+   args = codec:table(args)
+   return codec:finish(key, args)
 end
 
 function encode (alarm)
@@ -51,13 +54,32 @@ local function put_message (buf, len)
    if channel then channel:put_message(buf, len) end
 end
 
+function raise_alarm (key, args)
+   assert(key, 'Missing alarm key')
+   args = args or {}
+   args.is_cleared = false
+   if alarm_model.should_update(key, args) then
+      local buf, len = encode({'raise_alarm', {key, args}})
+      put_message(buf, len)
+   end
+end
+function clear_alarm (key, args)
+   assert(key, 'Missing alarm key')
+   args = args or {}
+   args.is_cleared = true
+   if alarm_model.should_update(key, args) then
+      local buf, len = encode({'clear_alarm', {key, args}})
+      put_message(buf, len)
+   end
+end
+
 function set_alarm (id)
    local buf, len = encode({'set_alarm', {id}})
    put_message(buf, len)
 end
 
 function selftest ()
-   print('selftest: apps.config.action_codec')
+   print('selftest: apps.config.alarm_codec')
    local lib = require("core.lib")
    local ffi = require("ffi")
    local function test_alarm(alarm)
@@ -65,10 +87,10 @@ function selftest ()
       local decoded = decode(encoded, len)
       assert(lib.equal(alarm, decoded))
    end
-   local id = "1"
-   -- Because lib.equal only returns true when comparing cdata of
-   -- exactly the same type, here we have to use uint8_t[?].
-   test_alarm({'set_alarm', {id}})
-   test_alarm({'clear_alarm', {id}})
+   local key = {resource='resource', alarm_type_id='alarm_type_id',
+                alarm_type_qualifier='alarm_type_qualifier'}
+   local args = {}
+   test_alarm({'raise_alarm', {key, args}})
+   test_alarm({'clear_alarm', {key, args}})
    print('selftest: ok')
 end

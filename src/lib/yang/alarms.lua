@@ -144,6 +144,28 @@ local function show_alarm_inventory (alarm_inventory)
    end
 end
 
+local function new_status_change (alarm, args)
+   assert(alarm and args)
+   if alarm.is_cleared ~= args.is_cleared then
+      return true
+   elseif args.perceived_severity and
+          alarm.perceived_severity ~= args.perceived_severity then
+      return true
+   elseif args.alarm_text and alarm.alarm_text ~= args.alarm_text then
+      return true
+   end
+   return false
+end
+
+-- to be called by alarm_codec.
+-- Returns true if a new alarm should be raiseit is necessary to add a new alarm or a new alarm status.
+function should_update (key, args)
+   key = alarm_key(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
+   local alarm = state.alarm_list.alarm[key]
+   if not alarm then return true end
+   return new_status_change(alarm, args)
+end
+
 -- Q: What's an alarm?
 -- A: The data associated with an alarm is the data specified in the yang schema.
 
@@ -179,18 +201,6 @@ local function create_status_change (alarm, status)
    alarm.last_changed = status.time
    state.alarm_list.last_changed = status.time
    table.insert(alarm.status_change, status)
-end
-
-local function new_status_change (alarm, args)
-   if alarm.is_cleared ~= args.is_cleared then
-      return true
-   elseif args.perceived_severity and
-          alarm.perceived_severity ~= args.perceived_severity then
-      return true
-   elseif args.alarm_text and alarm.alarm_text ~= args.alarm_text then
-      return true
-   end
-   return false
 end
 
 -- The following state changes creates an entry in this list:
