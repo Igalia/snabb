@@ -768,12 +768,12 @@ function Leader:receive_alarms_from_follower (follower)
 end
 
 function Leader:handle_alarm (follower, alarm)
-   local name, args = unpack(alarm)
-   if name == 'set_alarm' then
-      alarms.set_alarm(name, args)
+   local fn, args = unpack(alarm)
+   if fn == 'raise_alarm' then
+      alarms.raise_alarm(unpack(args))
    end
-   if name == 'clear_alarm' then
-      alarms.clear_alarm(name, args)
+   if fn == 'clear_alarm' then
+      alarms.clear_alarm(unpack(args))
    end
 end
 

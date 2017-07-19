@@ -146,8 +146,11 @@ function ARP:maybe_send_arp_request (output)
       -- More than 3 attempts to resolve an ARP address, raises an alarm.
       if self.use_alarms then
          if self.nrequests >= self.nrequests_threshold then
-            local alarm_key = "1"
-            alarm_codec.set_alarm(alarm_key)
+            local key = {
+               resource      = 'external-interface',
+               alarm_type_id = 'arp-resolution',
+            }
+            alarm_codec.raise_alarm(key)
          end
       end
    end

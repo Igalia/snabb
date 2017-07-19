@@ -55,22 +55,16 @@ local function put_message (buf, len)
 end
 
 function raise_alarm (key, args)
-   assert(key, 'Missing alarm key')
+   -- TODO: Manage raise messages are not sent too often.
    args = args or {}
-   args.is_cleared = false
-   if alarm_model.should_update(key, args) then
-      local buf, len = encode({'raise_alarm', {key, args}})
-      put_message(buf, len)
-   end
+   local buf, len = encode({'raise_alarm', {key, args}})
+   put_message(buf, len)
 end
 function clear_alarm (key, args)
-   assert(key, 'Missing alarm key')
+   -- TODO: Manage clear messages are not sent too often.
    args = args or {}
-   args.is_cleared = true
-   if alarm_model.should_update(key, args) then
-      local buf, len = encode({'clear_alarm', {key, args}})
-      put_message(buf, len)
-   end
+   local buf, len = encode({'clear_alarm', {key, args}})
+   put_message(buf, len)
 end
 
 function set_alarm (id)

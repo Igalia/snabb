@@ -11,41 +11,62 @@ local state = {
    shelved_alarms = nil,
 }
 
--- An alarm_type key is a tuple formed by {alarm_type_id, alarm_type_qualifier}.
-local alarm_type_key = (function ()
-   local cache = {}
-   return function (alarm_type_id, alarm_type_qualifier)
-      if not cache.alarm_type_id then
-         cache[alarm_type_id] = {}
-      end
-      local key = cache[alarm_type_id][alarm_type_qualifier]
-      if key then return key end
-      key = {alarm_type_id=alarm_type_id, alarm_type_qualifier=alarm_type_qualifier}
-      cache[alarm_type_id][alarm_type_qualifier] = key
-      return key
-   end
-end)()
+-- Cache of alarm keys.
+local alarm_keys = {}
 
--- An alarm key is a tuple fored by {resource, alarm_type_id, alarm_type_qualifier}.
-local alarm_key = (function ()
-   local cache = {}
-   return function (resource, alarm_type_id, alarm_type_qualifier)
-      resource = resource or ''
-      alarm_type_id = alarm_type_id or ''
-      alarm_type_qualifier = alarm_type_qualifier or ''
-      if not cache[resource] then
-         cache[resource] = {}
-      end
-      if not cache[resource][alarm_type_id] then
-         cache[resource][alarm_type_id] = {}
-      end
-      local v = cache[resource][alarm_type_id][alarm_type_qualifier]
-      if v then return v end
-      v = {resource=resource, alarm_type_id=alarm_type_id, alarm_type_qualifier=alarm_type_qualifier}
-      cache[resource][alarm_type_id][alarm_type_qualifier] = v
-      return v
+local function alarm_key (resource, alarm_type_id, alarm_type_qualifier)
+   resource = resource or ''
+   alarm_type_id = alarm_type_id or ''
+   alarm_type_qualifier = alarm_type_qualifier or ''
+   if not alarm_keys[resource] then
+      alarm_keys[resource] = {}
    end
-end)()
+   if not alarm_keys[resource][alarm_type_id] then
+      alarm_keys[resource][alarm_type_id] = {}
+   end
+   local key = alarm_keys[resource][alarm_type_id][alarm_type_qualifier]
+   if key then return key end
+   key = {resource=resource, alarm_type_id=alarm_type_id,
+        alarm_type_qualifier=alarm_type_qualifier}
+   alarm_keys[resource][alarm_type_id][alarm_type_qualifier] = key
+   return key
+end
+
+local function print_alarm_key (key)
+   local resource = key.resource or ''
+   local alarm_type_id = key.alarm_type_id or ''
+   local alarm_type_qualifier = key.alarm_type_qualifier or ''
+   print(("{%s, %s, %s}"):format(resource, alarm_type_id, alarm_type_qualifier))
+end
+
+-- Retrieves an alarm key object from the 'alarm_keys' cache, so it's guaranteed
+-- to be unique.
+local function normalize_alarm_key (key)
+   return alarm_key(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
+end
+
+-- Cache of alarm type keys.
+local alarm_type_keys = {}
+
+-- An alarm_type key is a tuple formed by {alarm_type_id, alarm_type_qualifier}.
+local function alarm_type_key (alarm_type_id, alarm_type_qualifier)
+   alarm_type_id = alarm_type_id or ''
+   alarm_type_qualifier = alarm_type_qualifier or ''
+   if not alarm_type_keys.alarm_type_id then
+      alarm_type_keys[alarm_type_id] = {}
+   end
+   local key = alarm_type_keys[alarm_type_id][alarm_type_qualifier]
+   if key then return key end
+   key = {alarm_type_id=alarm_type_id, alarm_type_qualifier=alarm_type_qualifier}
+   alarm_type_keys[alarm_type_id][alarm_type_qualifier] = key
+   return key
+end
+
+-- Retrieves an alarm key object from the 'alarm_type_keys' cache, so it's
+-- guaranteed to be unique.
+local function normalize_alarm_type_key (key)
+   return alarm_type_key(key.alarm_type_id, key.alarm_type_quailfier)
+end
 
 -- Static alarm_inventory list.
 local alarm_inventory_table = {
@@ -81,8 +102,8 @@ local alarm_list_table = {
    },
 }
 
-local function init (current_configuration)
-   -- The alarms inventory is always initialized with a predefined list of 
+function init (current_configuration)
+   -- The alarms inventory is always initialized with a predefined list of
    -- alarm types.
    local function init_alarm_inventory ()
       local alarm_type = {}
@@ -157,23 +178,8 @@ local function new_status_change (alarm, args)
    return false
 end
 
--- to be called by alarm_codec.
--- Returns true if a new alarm should be raiseit is necessary to add a new alarm or a new alarm status.
-function should_update (key, args)
-   key = alarm_key(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
-   local alarm = state.alarm_list.alarm[key]
-   if not alarm then return true end
-   return new_status_change(alarm, args)
-end
-
 -- Q: What's an alarm?
 -- A: The data associated with an alarm is the data specified in the yang schema.
-
--- to be called by the leader.
-function set_alarm (key, args)
-   local id = unpack(args)
-   print('set_alarm: '..id)
-end
 
 local function gmtime ()
    local now = os.time()
@@ -265,16 +271,33 @@ local function create_or_update_alarm(key, args)
    end
 end
 
--- to be called by the leader.
+-- Returns true if a new alarm should be created or,  in case it already exists
+-- if a new alarm status should be added.
+local function should_update (key, args)
+   key = alarm_key(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
+   local alarm = state.alarm_list.alarm[key]
+   if not alarm then return true end
+   return new_status_change(alarm, args)
+end
+
+-- To be called by the leader.
 function raise_alarm (key, args)
    args = args or {}
    args.is_cleared = false
-   create_or_update_alarm(key, args)
+   key = normalize_alarm_key(key)
+   if should_update(key, args) then
+      create_or_update_alarm(key, args)
+   end
 end
 
--- to be called by the leader.
+-- To be called by the leader.
 function clear_alarm (key)
-   create_or_update_alarm(key, {is_cleared=true})
+   args = args or {}
+   args.is_cleared = true
+   key = normalize_alarm_key(key)
+   if should_update(key, args) then
+      create_or_update_alarm(key, args)
+   end
 end
 
 local function set (t)
@@ -538,10 +561,10 @@ function selftest ()
    -- Init.
    init(conf)
    assert(config == conf.softwire_config.alarms.control)
-   assert(type(state.alarm_inventory) == 'table') 
-   assert(type(state.alarm_inventory.alarm_type) == 'table') 
-   assert(type(state.alarm_list) == 'table') 
-   assert(type(state.alarm_list.alarm) == 'table') 
+   assert(type(state.alarm_inventory) == 'table')
+   assert(type(state.alarm_inventory.alarm_type) == 'table')
+   assert(type(state.alarm_list) == 'table')
+   assert(type(state.alarm_list.alarm) == 'table')
 
    -- Check alarm inventory has been loaded.
    assert(table_size(state.alarm_inventory.alarm_type) == 2)
