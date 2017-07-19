@@ -135,10 +135,28 @@ function selftest ()
       assert(lib.equal(data, loaded.data))
       os.remove(tmp)
    end
+   local function encode_decode (data)
+      local buf, len
+      local encode = encoder()
+      if type(data) == 'number' then
+         encode:uint32(data)
+         local decode = decoder(encode:finish())
+         assert(data == decode:uint32())
+      elseif type(data) == 'string' then
+         encode:string(data)
+         local decode = decoder(encode:finish())
+         assert(data == decode:string())
+      end
+   end
+
    serialize('foo')
    serialize({foo='bar'})
    serialize({foo={qux='baz'}})
    serialize(1)
    serialize(1LL)
+
+   encode_decode('foo')
+   encode_decode(1)
+
    print('selftest: ok')
 end
