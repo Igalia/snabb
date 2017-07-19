@@ -3,7 +3,6 @@ module(..., package.seeall)
 
 local lib = require("core.lib")
 local shm = require("core.shm")
-local xpath = require("lib.yang.path")
 local yang = require("lib.yang.yang")
 local yang_data = require("lib.yang.data")
 local counter = require("core.counter")
@@ -90,11 +89,9 @@ local function set_data_value(data, path, value)
    set_data_value(data[head], path, value)
 end
 
-function show_state(scm, pid, raw_path)
+function show_state(scm, pid)
    local schema = yang.load_schema_by_name(scm)
-   local grammar = yang_data.data_grammar_from_schema(schema)
    local counters = find_counters(pid)
-   local path = xpath.convert_path(grammar, raw_path)
 
    -- Lookup the specific schema element that's being addressed by the path
    local leaves = collect_state_leaves(schema)()
