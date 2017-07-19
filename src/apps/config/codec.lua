@@ -66,7 +66,7 @@ function encoder()
    end
    function encoder:config(class, arg)
       local file_name = random_file_name()
-      if class.yang_schema then
+      if class and class.yang_schema then
          yang.compile_data_for_schema_by_name(class.yang_schema, arg,
                                               file_name)
       else
@@ -146,6 +146,10 @@ function selftest ()
          encode:string(data)
          local decode = decoder(encode:finish())
          assert(data == decode:string())
+      elseif type(data) == 'table' then
+         encode:config(nil, data)
+         local decode = decoder(encode:finish())
+         assert(lib.equal(data, decode:config()))
       end
    end
 
@@ -156,6 +160,8 @@ function selftest ()
    serialize(1LL)
 
    encode_decode('foo')
+   encode_decode({foo='bar'})
+   encode_decode({foo={qux='baz'}})
    encode_decode(1)
 
    print('selftest: ok')
