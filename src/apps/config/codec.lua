@@ -32,7 +32,7 @@ local upper_case = lower_case:upper()
 local extra = "0123456789_-"
 local alphabet = table.concat({lower_case, upper_case, extra})
 assert(#alphabet == 64)
-local function random_file_name()
+local function random_file_name(prefix)
    -- 22 bytes, but we only use 2^6=64 bits from each byte, so total of
    -- 132 bits of entropy.
    local bytes = lib.random_data(22)
@@ -40,8 +40,9 @@ local function random_file_name()
    for i=1,#bytes do
       table.insert(out, alphabet:byte(bytes:byte(i) % 64 + 1))
    end
+   prefix = prefix or 'app-conf'
    local basename = string.char(unpack(out))
-   return shm.root..'/'..tostring(S.getpid())..'/app-conf-'..basename
+   return shm.root..'/'..tostring(S.getpid())..'/'..prefix..'-'..basename
 end
 
 function encoder()
@@ -64,13 +65,19 @@ function encoder()
       self:string(require_path)
       self:string(name)
    end
+   function encoder:table(t)
+      t = t or {}
+      local file_name = random_file_name('table')
+      binary.compile_ad_hoc_lua_data_to_file(file_name, t)
+      self:string(file_name)
+   end
    function encoder:config(class, arg)
+      assert(class)
       local file_name = random_file_name()
-      if class and class.yang_schema then
-         yang.compile_data_for_schema_by_name(class.yang_schema, arg,
-                                              file_name)
+      if class.yang_schema then
+         yang.compile_data_for_schema_by_name(class.yang_schema, arg, file_name)
       else
-         if arg == nil then arg = {} end
+         arg = arg or {}
          binary.compile_ad_hoc_lua_data_to_file(file_name, arg)
       end
       self:string(file_name)
@@ -115,6 +122,9 @@ function decoder(buf, len)
       local require_path, name = self:string(), self:string()
       return assert(require(require_path)[name])
    end
+   function decoder:table()
+      return binary.load_compiled_data_file(self:string()).data
+   end
    function decoder:config()
       return binary.load_compiled_data_file(self:string()).data
    end
@@ -147,7 +157,7 @@ function selftest ()
          local decode = decoder(encode:finish())
          assert(data == decode:string())
       elseif type(data) == 'table' then
-         encode:config(nil, data)
+         encode:table(data)
          local decode = decoder(encode:finish())
          assert(lib.equal(data, decode:config()))
       end
