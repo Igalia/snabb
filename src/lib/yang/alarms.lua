@@ -14,11 +14,9 @@ local state = {
    shelved_alarms = nil,
 }
 
-local function get_alarms_state ()
-   return alarms.state()
-end
+local alarm_list_table = load_alarm_list()
 
--- Cache of alarm keys.
+-- Single point access to alarm keys.
 alarm_keys = {}
 
 function alarm_keys:fetch (...)
@@ -91,8 +89,6 @@ local function load_alarm_list (filename)
    return ret
 end
 
-local alarm_list_table = load_alarm_list()
-
 local function load_alarm_inventory (filename)
    filename = filename or 'lib/yang/alarm_inventory.csv'
    local ret = {}
@@ -116,6 +112,7 @@ function init (current_configuration)
          alarm = {},
       },
    }
+   alarm_list_table = load_alarm_list()
 end
 
 -- Helper function for pretty printing a table.
