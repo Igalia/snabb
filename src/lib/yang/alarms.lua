@@ -85,7 +85,7 @@ local function load_alarm_list (filename)
    filename = filename or 'lib/yang/alarm_list.csv'
    local ret = {}
    for _, row in ipairs(csv_to_table(filename, {sep='|'})) do
-      local key_str = alarm_keys:tostring(row)
+      local key_str = alarm_keys:normalize(row)
       ret[key_str] = row
    end
    return ret
@@ -222,7 +222,7 @@ local function flat_copy (src, args)
 end
 
 local function fetch_alarm_from_table (key)
-   local key_str = alarm_keys:tostring(key)
+   local key_str = alarm_keys:normalize(key)
    return alarm_list_table[key_str]
 end
 
