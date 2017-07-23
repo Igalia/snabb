@@ -75,33 +75,24 @@ local function normalize_alarm_type_key (key)
    return alarm_type_key(key.alarm_type_id, key.alarm_type_quailfier)
 end
 
--- Static alarm_list.
-local alarm_list_table = {
-   ['external-interface|arp-resolution|'] = {
-      resource='external-interface',
-      alarm_type_id='arp-resolution',
-      alarm_type_qualifier='',
-      perceived_severity='critical',
-      alarm_text=[[
-         Make sure you can resolved external-inteface.next-hop.ip from the lwAFTR.
-         If cannot resolve it, consider using the MAC address of the next-hop
-         directly.  To do it so, set external-interface.next-hop.mac to the
-         value of the MAC address.
-      ]]
-   },
-   ['internal-interface|ndp-resolution|'] = {
-      resource='internal-interface',
-      alarm_type_id='ndp-resolution',
-      alarm_type_qualifier='',
-      perceived_severity='critical',
-      alarm_text=[[
-         Make sure you can resolved internal-inteface.next-hop.ip from the lwAFTR.
-         If cannot resolve it, consider using the MAC address of the next-hop
-         directly.  To do it so, set internal-interface.next-hop.mac to the
-         value of the MAC address.
-      ]]
-   },
-}
+local function alarm_key_str (alarm)
+   local resource = assert(alarm.resource)
+   local alarm_type_id = assert(alarm.alarm_type_id)
+   local alarm_type_qualifier = alarm.alarm_type_qualifier or ''
+   return table.concat({resource, alarm_type_id, alarm_type_qualifier}, '|')
+end
+
+local function load_alarm_list (filename)
+   filename = filename or 'lib/yang/alarm_list.csv'
+   local ret = {}
+   for _, row in ipairs(csv_to_table(filename, {sep='|'})) do
+      local key_str = alarm_key_str(row)
+      ret[key_str] = row
+   end
+   return ret
+end
+
+local alarm_list_table = load_alarm_list()
 
 local function load_alarm_inventory (filename)
    filename = filename or 'lib/yang/alarm_inventory.csv'
@@ -232,11 +223,8 @@ local function flat_copy (src, args)
 end
 
 local function fetch_alarm_from_table (key)
-   local resource = assert(key.resource)
-   local alarm_type_id = assert(key.alarm_type_id)
-   local alarm_type_qualifier = key.alarm_type_qualifier or ''
-   local str_key = table.concat({resource, alarm_type_id, alarm_type_qualifier}, '|')
-   return alarm_list_table[str_key]
+   local key_str = alarm_key_str(key)
+   return alarm_list_table[key_str]
 end
 
 local function create_alarm (key, args)
@@ -552,6 +540,12 @@ function selftest ()
          }
       }
    ]]
+
+   local filename = 'lib/yang/alarm_list.csv'
+   local t = csv_to_table(filename, {sep='|'})
+   assert(#t > 0)
+   assert(t[1].resource, "#t: "..#t)
+
    local conf = data.load_data_for_schema_by_name('snabb-softwire-v2', conf)
    assert(conf.softwire_config.alarms.control.notify_status_changes)
 
