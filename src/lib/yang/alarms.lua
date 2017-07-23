@@ -14,6 +14,10 @@ state = {
 }
 local alarm_list_table
 
+function get_state ()
+   return state
+end
+
 -- Single point access to alarm keys.
 alarm_keys = {}
 

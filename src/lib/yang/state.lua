@@ -92,11 +92,7 @@ function show_state(scm, pid)
    local schema = yang.load_schema_by_name(scm)
    local counters = find_counters(pid)
 
-   local data = {
-      test = {
-         test = 'hello'
-      }
-   }
+   local data = {}
 
    -- Lookup the specific schema element that's being addressed by the path
    --[[
@@ -111,18 +107,78 @@ function show_state(scm, pid)
    end
    --]]
 
-   -- set_data_value(data, {'test', 'test'}, 'hello')
+
    --[[
-   data.test = {}
-   data.test.test = 'hello'
-   --]]
-   --[[
-   data.alarms = {}
-   data.alarms.alarm_list = {}
-   data.alarms.alarm_list.number_of_alarms = 0
+   local leaves = collect_alarm_leaves('softwire-state/alarms')
+   for path, value in pairs(leaves) do
+      set_data_value(data, path, value)
+   end
    --]]
 
+   set_data_value(data, {'softwire-state', 'alarms', 'test', 'test' }, 'hello')
+
    return data
+end
+
+local alarms = require('lib.yang.alarms')
+
+local function collect_alarm_leaves (t, path)
+   path = path or ''
+   local visit
+   local leaves = {}
+   local function visit_leaf (v, path)
+      leaves[path] = v
+   end
+   local function is_hash (t)
+      if type(t) == 'table' then
+         for k,_ in pairs(t) do
+            if not tonumber(k) then return true end
+         end
+      end
+   end
+   local function is_array (t)
+      if type(t) == 'table' then
+         for k, v in ipairs(t) do return true end
+      end
+   end
+   local function flat_key (key)
+      local ret = {}
+      for k, v in pairs(key) do
+         table.insert(ret, '['..k..'='..v..']')
+      end
+      return table.concat(ret)
+   end
+   local function visit_array (t, path)
+      for i, v in ipairs(t) do
+         if type(v) == 'table' then
+            visit(v, path..'[position()='..i..']')
+         else
+            visit_leaf(v, path..'[position()='..i..']')
+         end
+      end
+   end
+   visit = function (t, path)
+      path = path or ''
+      for k, v in pairs(t) do
+         if is_array(v) then
+            visit_array(v, path..'/'..k)
+         elseif type(v) == 'table' then
+            if is_hash(k) then
+               visit(v, path..flat_key(k))
+            else
+               visit(v, path..'/'..k)
+            end
+         else
+            if is_hash(k) then
+               visit_leaf(v, path..flat_key(k))
+            else
+               visit_leaf(v, path..'/'..k)
+            end
+         end
+      end
+   end
+   visit(t, path)
+   return leaves
 end
 
 function selftest ()
@@ -205,5 +261,22 @@ function selftest ()
    -- Check flatten produces a single dimentional table with all the elements.
    local multi_dimentional = {{hello="hello"}, {world="world"}}
    assert(flatten(multi_dimentional), {hello="hello", world="world"})
+
+   -- Test alarms collection.
+   local state = {
+      alarm_list = {
+         number_of_alarms = 2,
+      },
+      resources = {'resource1', 'resource2','resource3'},
+      alarm_types = {},
+   }
+   local key1 = {alarm_type_id='id1', alarm_type_qualifier='qa1'}
+   state.alarm_types[key1] = 'hi'
+
+   local leaves = collect_alarm_leaves(state, 'softwire-state/alarms')
+   assert(leaves['softwire-state/alarms/alarm_list/number_of_alarms'] == 2)
+   assert(leaves['softwire-state/alarms/resources[position()=2]'] == 'resource2')
+   assert(leaves['softwire-state/alarms/alarm_types[alarm_type_qualifier=qa1][alarm_type_id=id1]'] == 'hi')
+
    print("selftest: ok")
 end
