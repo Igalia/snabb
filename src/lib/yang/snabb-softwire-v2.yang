@@ -810,6 +810,13 @@ module snabb-softwire-v2 {
       }
     }
 
+    container test {
+      leaf test {
+         type string;
+         description "test";
+      }
+    }
+
     container alarms {
         description
             "The top container for this module";
