@@ -19,49 +19,39 @@ local function get_alarms_state ()
 end
 
 -- Cache of alarm keys.
-local alarm_keys = {}
+alarm_keys = {}
 
-local function alarm_key (resource, alarm_type_id, alarm_type_qualifier)
-   resource = resource or ''
-   alarm_type_id = alarm_type_id or ''
+function alarm_keys:fetch (...)
+   self.cache = self.cache or {}
+   local function lookup (resource, alarm_type_id, alarm_type_qualifier)
+      if not self.cache[resource] then
+         self.cache[resource] = {}
+      end
+      if not self.cache[resource][alarm_type_id] then
+         self.cache[resource][alarm_type_id] = {}
+      end
+      return self.cache[resource][alarm_type_id][alarm_type_qualifier]
+   end
+   local resource, alarm_type_id, alarm_type_qualifier = unpack({...})
+   assert(resource and alarm_type_id)
    alarm_type_qualifier = alarm_type_qualifier or ''
-   if not alarm_keys[resource] then
-      alarm_keys[resource] = {}
+   local key = lookup(resource, alarm_type_id, alarm_type_qualifier)
+   if not key then
+      key = {resource=resource, alarm_type_id=alarm_type_id,
+             alarm_type_qualifier=alarm_type_qualifier}
+      self.cache[resource][alarm_type_id][alarm_type_qualifier] = key
    end
-   if not alarm_keys[resource][alarm_type_id] then
-      alarm_keys[resource][alarm_type_id] = {}
-   end
-   local key = alarm_keys[resource][alarm_type_id][alarm_type_qualifier]
-   if key then return key end
-   key = {resource=resource, alarm_type_id=alarm_type_id,
-        alarm_type_qualifier=alarm_type_qualifier}
-   alarm_keys[resource][alarm_type_id][alarm_type_qualifier] = key
    return key
 end
-
-local function print_alarm_key (key)
-   local resource = key.resource or ''
-   local alarm_type_id = key.alarm_type_id or ''
+function alarm_keys:normalize (key)
+   local resource = assert(key.resource)
+   local alarm_type_id = assert(key.alarm_type_id)
    local alarm_type_qualifier = key.alarm_type_qualifier or ''
-   print(("{%s, %s, %s}"):format(resource, alarm_type_id, alarm_type_qualifier))
+   return self:fetch(resource, alarm_type_id, alarm_type_qualifier)
 end
-
--- Retrieves an alarm key object from the 'alarm_keys' cache, so it's guaranteed
--- to be unique.
-local function normalize_alarm_key (key)
-   return alarm_key(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
-end
-
-local function lookup (t, arg)
-   local t = t
-   for i=1,#arg-1 do
-      if not t[arg[i]] then
-         t[arg[i]] = {}
-      end
-      t = t[arg[i]]
-   end
-   local last = arg[#arg]
-   return t[last]
+function alarm_keys:tostring (key)
+   key = self:fetch(self:normalize(key))
+   return ("%s|%s|%s"):format(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
 end
 
 -- Single point access to alarm type keys.
@@ -69,13 +59,19 @@ alarm_type_keys = {}
 
 function alarm_type_keys:fetch (...)
    self.cache = self.cache or {}
-   local cache = self.cache
-   local args = {...}
-   local key = lookup(cache, args)
+   local function lookup (alarm_type_id, alarm_type_qualifier)
+      if not self.cache[alarm_type_id] then
+         self.cache[alarm_type_id] = {}
+      end
+      return self.cache[alarm_type_id][alarm_type_qualifier]
+   end
+   local alarm_type_id, alarm_type_qualifier = unpack({...})
+   assert(alarm_type_id)
+   alarm_type_qualifier = alarm_type_qualifier or ''
+   local key = lookup(alarm_type_id, alarm_type_qualifier)
    if not key then
-      local alarm_type_id, alarm_type_qualifier = unpack(args)
       key = {alarm_type_id=alarm_type_id, alarm_type_qualifier=alarm_type_qualifier}
-      cache[alarm_type_id][alarm_type_qualifier] = key
+      self.cache[alarm_type_id][alarm_type_qualifier] = key
    end
    return key
 end
@@ -269,7 +265,7 @@ end
 -- Returns true if a new alarm should be created or,  in case it already exists
 -- if a new alarm status should be added.
 local function should_update (key, args)
-   key = alarm_key(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
+   key = alarm_keys:normalize(key)
    local alarm = state.alarm_list.alarm[key]
    if not alarm then return true end
    return new_status_change(alarm, args)
@@ -279,7 +275,7 @@ end
 function raise_alarm (key, args)
    args = args or {}
    args.is_cleared = false
-   key = normalize_alarm_key(key)
+   key = alarm_keys:normalize(key)
    if should_update(key, args) then
       create_or_update_alarm(key, args)
    end
@@ -289,7 +285,7 @@ end
 function clear_alarm (key)
    local args = {}
    args.is_cleared = true
-   key = normalize_alarm_key(key)
+   key = alarm_keys:normalize(key)
    if should_update(key, args) then
       create_or_update_alarm(key, args)
    end
@@ -574,7 +570,7 @@ function selftest ()
    assert(state.alarm_list.number_of_alarms == 0)
 
    -- Raising an alarm when alarms is empty, creates an alarm.
-   local key = alarm_key('external-interface', 'arp-resolution')
+   local key = alarm_keys:fetch('external-interface', 'arp-resolution')
    raise_alarm(key)
    local alarm = assert(state.alarm_list.alarm[key])
    assert(table_size(alarm.status_change) == 1)
@@ -647,13 +643,18 @@ function selftest ()
    assert(table_size(alarm.operator_state_change) == 2)
 
    -- Set operator state change on non existent alarm should fail.
-   local key = alarm_key('none', 'none')
+   local key = alarm_keys:fetch('none', 'none')
    local success = set_operator_state(key, {state='ack'})
    assert(not success)
 
+   local key1 = alarm_keys:fetch('external-interface', 'arp-resolution')
+   local key2 = alarm_keys:fetch('external-interface', 'arp-resolution')
+   assert(key1 == key2)
+
    -- Compress alarms.
-   local key = alarm_key('external-interface', 'arp-resolution')
+   local key = alarm_keys:fetch('external-interface', 'arp-resolution')
    local alarm = state.alarm_list.alarm[key]
+   assert(alarm)
    assert(table_size(alarm.status_change) == 4)
    compress_alarms('external-interface')
    assert(table_size(alarm.status_change) == 1)
@@ -669,13 +670,13 @@ function selftest ()
    assert(purge_alarms({status = 'any'}) == 0)
 
    -- Purge alarms filtering by older_than.
-   local key = alarm_key('external-interface', 'arp-resolution')
+   local key = alarm_keys:fetch('external-interface', 'arp-resolution')
    raise_alarm(key)
    sleep(1)
    assert(purge_alarms({older_than={age_spec='seconds', value='1'}}) == 1)
 
    -- Purge alarms by severity.
-   local key = alarm_key('external-interface', 'arp-resolution')
+   local key = alarm_keys:fetch('external-interface', 'arp-resolution')
    raise_alarm(key)
    assert(table_size(state.alarm_list.alarm) == 1)
    assert(purge_alarms({severity={sev_spec='is', value='minor'}}) == 0)
@@ -685,13 +686,13 @@ function selftest ()
    raise_alarm(key, {perceived_severity='minor'})
    assert(purge_alarms({severity={sev_spec='is', value='minor'}}) == 1)
 
-   raise_alarm(alarm_key('external-interface', 'arp-resolution'))
-   raise_alarm(alarm_key('internal-interface', 'ndp-resolution'))
+   raise_alarm(alarm_keys:fetch('external-interface', 'arp-resolution'))
+   raise_alarm(alarm_keys:fetch('internal-interface', 'ndp-resolution'))
    assert(table_size(state.alarm_list.alarm) == 2)
    assert(purge_alarms({severity={sev_spec='above', value='minor'}}) == 2)
 
    -- Purge alarms by operator_state.
-   local key = alarm_key('external-interface', 'arp-resolution')
+   local key = alarm_keys:fetch('external-interface', 'arp-resolution')
    raise_alarm(key)
    assert(table_size(state.alarm_list.alarm) == 1)
    local success, alarm = set_operator_state(key, {state='ack'})
