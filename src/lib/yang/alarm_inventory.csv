@@ -1,0 +1,3 @@
+alarm_type_id |alarm_type_qualifier|resource          |has_clear|description
+arp-resolution|                    |external-interface|true     |
+ndp-resolution|                    |internal-interface|true     |

@@ -1,6 +1,9 @@
 module(..., package.seeall)
 
 local S = require("syscall")
+local util = require('lib.yang.util')
+
+local csv_to_table = util.csv_to_table
 
 local config = {}
 
@@ -72,12 +75,6 @@ local function normalize_alarm_type_key (key)
    return alarm_type_key(key.alarm_type_id, key.alarm_type_quailfier)
 end
 
--- Static alarm_inventory list.
-local alarm_inventory_table = {
-   { alarm_type_id='arp-resolution', alarm_type_qualifier='', resource={'external-interface'}, has_clear=true, description=''},
-   { alarm_type_id='ndp-resolution', alarm_type_qualifier='', resource={'internal-interface'}, has_clear=true, description=''},
-}
-
 -- Static alarm_list.
 local alarm_list_table = {
    ['external-interface|arp-resolution|'] = {
@@ -106,32 +103,28 @@ local alarm_list_table = {
    },
 }
 
+local function load_alarm_inventory (filename)
+   filename = filename or 'lib/yang/alarm_inventory.csv'
+   local ret = {}
+   for _, row in ipairs(csv_to_table(filename, {sep='|'})) do
+      local key = alarm_type_key(row.alarm_type_id, row.alarm_type_qualifier)
+      ret[key] = row
+   end
+   return ret
+end
+
 function init (current_configuration)
    -- The alarms inventory is always initialized with a predefined list of
    -- alarm types.
-   local function init_alarm_inventory ()
-      local alarm_type = {}
-      for _, row in ipairs(alarm_inventory_table) do
-         local key = alarm_type_key(row.alarm_type_id, row.alarm_type_qualifier)
-         if not alarm_type[key] then
-            alarm_type[key] = {
-               alarm_type_id=row.alarm_type_id,
-               alarm_type_qualifier=row.alarm_type_qualifier,
-               resource=row.resource,
-               has_clear=row.has_clear,
-               description=row.description,
-            }
-         end
-      end
-      return { alarm_type = alarm_type }
-   end
    config = current_configuration.softwire_config.alarms.control
    state = {
-      alarm_inventory = init_alarm_inventory(),
+      alarm_inventory = {
+         alarm_type = load_alarm_inventory(),
+      },
       alarm_list = {
          number_of_alarms = 0,
          alarm = {},
-      }
+      },
    }
 end
 
