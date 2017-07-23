@@ -144,8 +144,8 @@ function csv_to_table (filename, opts)
    end
    local function trim (str)
       str = str or ''
-      str:gsub("^%s+", "")
-      str:gsub("%s+$", "")
+      str = str:gsub("^%s+", "")
+      str = str:gsub("%s+$", "")
       return str
    end
    local function parse_line (line)
