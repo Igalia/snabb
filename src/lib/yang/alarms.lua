@@ -296,7 +296,7 @@ end
 
 -- To be called by the leader.
 function clear_alarm (key)
-   args = args or {}
+   local args = {}
    args.is_cleared = true
    key = normalize_alarm_key(key)
    if should_update(key, args) then
