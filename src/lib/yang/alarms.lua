@@ -5,16 +5,14 @@ local util = require('lib.yang.util')
 
 local csv_to_table = util.csv_to_table
 
-local config = {}
-
-local state = {
+config = {}
+state = {
    alarm_inventory = nil,
    summary = nil,
    alarm_list = nil,
    shelved_alarms = nil,
 }
-
-local alarm_list_table = load_alarm_list()
+local alarm_list_table
 
 -- Single point access to alarm keys.
 alarm_keys = {}
@@ -267,6 +265,7 @@ function raise_alarm (key, args)
    args.is_cleared = false
    key = alarm_keys:normalize(key)
    if should_update(key, args) then
+      print('create_or_update_alarm')
       create_or_update_alarm(key, args)
    end
 end

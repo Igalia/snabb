@@ -92,7 +92,14 @@ function show_state(scm, pid)
    local schema = yang.load_schema_by_name(scm)
    local counters = find_counters(pid)
 
+   local data = {
+      test = {
+         test = 'hello'
+      }
+   }
+
    -- Lookup the specific schema element that's being addressed by the path
+   --[[
    local leaves = collect_state_leaves(schema)()
    local data = {}
    for leaf_path, leaf in pairs(leaves) do
@@ -102,6 +109,19 @@ function show_state(scm, pid)
          end
       end
    end
+   --]]
+
+   -- set_data_value(data, {'test', 'test'}, 'hello')
+   --[[
+   data.test = {}
+   data.test.test = 'hello'
+   --]]
+   --[[
+   data.alarms = {}
+   data.alarms.alarm_list = {}
+   data.alarms.alarm_list.number_of_alarms = 0
+   --]]
+
    return data
 end
 

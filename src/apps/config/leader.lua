@@ -577,6 +577,7 @@ function Leader:rpc_get_state (args)
       if args.schema ~= self.schema_name then
             return self:foreign_rpc_get_state(args.schema, args.path, args)
       end
+      print('schema-name: '..self.schema_name)
       local printer = path_printer_for_schema_by_name(self.schema_name, args.path, args)
       local s = {}
       for _, follower in pairs(self.followers) do
@@ -587,6 +588,12 @@ function Leader:rpc_get_state (args)
       return {state=printer(s, yang.string_output_file())}
    end
    local success, response = pcall(getter)
+   print('success: '..(success and 'true' or 'false'))
+   print('response: ')
+   for k, v in pairs(response) do
+      print(k, v)
+   end
+   print('end')
    if success then return response else return {status=1, error=response} end
 end
 function Leader:handle (payload)
