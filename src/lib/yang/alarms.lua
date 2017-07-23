@@ -50,7 +50,7 @@ function alarm_keys:normalize (key)
    return self:fetch(resource, alarm_type_id, alarm_type_qualifier)
 end
 function alarm_keys:tostring (key)
-   key = self:fetch(self:normalize(key))
+   key = self:normalize(key)
    return ("%s|%s|%s"):format(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
 end
 
@@ -81,18 +81,11 @@ function alarm_type_keys:normalize (key)
    return self:fetch(alarm_type_id, alarm_type_qualifier)
 end
 
-local function alarm_key_str (alarm)
-   local resource = assert(alarm.resource)
-   local alarm_type_id = assert(alarm.alarm_type_id)
-   local alarm_type_qualifier = alarm.alarm_type_qualifier or ''
-   return table.concat({resource, alarm_type_id, alarm_type_qualifier}, '|')
-end
-
 local function load_alarm_list (filename)
    filename = filename or 'lib/yang/alarm_list.csv'
    local ret = {}
    for _, row in ipairs(csv_to_table(filename, {sep='|'})) do
-      local key_str = alarm_key_str(row)
+      local key_str = alarm_keys:tostring(row)
       ret[key_str] = row
    end
    return ret
@@ -229,7 +222,7 @@ local function flat_copy (src, args)
 end
 
 local function fetch_alarm_from_table (key)
-   local key_str = alarm_key_str(key)
+   local key_str = alarm_keys:tostring(key)
    return alarm_list_table[key_str]
 end
 
