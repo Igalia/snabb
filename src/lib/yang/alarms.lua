@@ -52,27 +52,37 @@ local function normalize_alarm_key (key)
    return alarm_key(key.resource, key.alarm_type_id, key.alarm_type_qualifier)
 end
 
--- Cache of alarm type keys.
-local alarm_type_keys = {}
-
--- An alarm_type key is a tuple formed by {alarm_type_id, alarm_type_qualifier}.
-local function alarm_type_key (alarm_type_id, alarm_type_qualifier)
-   alarm_type_id = alarm_type_id or ''
-   alarm_type_qualifier = alarm_type_qualifier or ''
-   if not alarm_type_keys.alarm_type_id then
-      alarm_type_keys[alarm_type_id] = {}
+local function lookup (t, arg)
+   local t = t
+   for i=1,#arg-1 do
+      if not t[arg[i]] then
+         t[arg[i]] = {}
+      end
+      t = t[arg[i]]
    end
-   local key = alarm_type_keys[alarm_type_id][alarm_type_qualifier]
-   if key then return key end
-   key = {alarm_type_id=alarm_type_id, alarm_type_qualifier=alarm_type_qualifier}
-   alarm_type_keys[alarm_type_id][alarm_type_qualifier] = key
-   return key
+   local last = arg[#arg]
+   return t[last]
 end
 
--- Retrieves an alarm key object from the 'alarm_type_keys' cache, so it's
--- guaranteed to be unique.
-local function normalize_alarm_type_key (key)
-   return alarm_type_key(key.alarm_type_id, key.alarm_type_quailfier)
+-- Single point access to alarm type keys.
+alarm_type_keys = {}
+
+function alarm_type_keys:fetch (...)
+   self.cache = self.cache or {}
+   local cache = self.cache
+   local args = {...}
+   local key = lookup(cache, args)
+   if not key then
+      local alarm_type_id, alarm_type_qualifier = unpack(args)
+      key = {alarm_type_id=alarm_type_id, alarm_type_qualifier=alarm_type_qualifier}
+      cache[alarm_type_id][alarm_type_qualifier] = key
+   end
+   return key
+end
+function alarm_type_keys:normalize (key)
+   local alarm_type_id = assert(key.alarm_type_id)
+   local alarm_type_qualifier = key.alarm_type_qualifier
+   return self:fetch(alarm_type_id, alarm_type_qualifier)
 end
 
 local function alarm_key_str (alarm)
@@ -98,7 +108,7 @@ local function load_alarm_inventory (filename)
    filename = filename or 'lib/yang/alarm_inventory.csv'
    local ret = {}
    for _, row in ipairs(csv_to_table(filename, {sep='|'})) do
-      local key = alarm_type_key(row.alarm_type_id, row.alarm_type_qualifier)
+      local key = alarm_type_keys:fetch(row.alarm_type_id, row.alarm_type_qualifier)
       ret[key] = row
    end
    return ret
