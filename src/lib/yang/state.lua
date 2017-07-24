@@ -1,10 +1,12 @@
 -- Use of this source code is governed by the Apache 2.0 license; see COPYING.
 module(..., package.seeall)
 
+local alarms = require('lib.yang.alarms')
 local lib = require("core.lib")
 local shm = require("core.shm")
 local yang = require("lib.yang.yang")
 local yang_data = require("lib.yang.data")
+local util = require("lib.yang.util")
 
 local counter_directory = "/apps"
 
@@ -88,6 +90,11 @@ local function set_data_value(data, path, value)
    set_data_value(data[head], path, value)
 end
 
+local function collect_alarms_state (data)
+   data.softwire_state = data.softwire_state or {}
+   data.softwire_state.alarms = alarms.get_state()
+end
+
 function show_state(scm, pid)
    local schema = yang.load_schema_by_name(scm)
    local counters = find_counters(pid)
@@ -95,7 +102,6 @@ function show_state(scm, pid)
    local data = {}
 
    -- Lookup the specific schema element that's being addressed by the path
-   --[[
    local leaves = collect_state_leaves(schema)()
    local data = {}
    for leaf_path, leaf in pairs(leaves) do
@@ -105,80 +111,10 @@ function show_state(scm, pid)
          end
       end
    end
-   --]]
 
-
-   --[[
-   local leaves = collect_alarm_leaves('softwire-state/alarms')
-   for path, value in pairs(leaves) do
-      set_data_value(data, path, value)
-   end
-   --]]
-
-   set_data_value(data, {'softwire-state', 'alarms', 'test', 'test' }, 'hello')
+   collect_alarms_state(data)
 
    return data
-end
-
-local alarms = require('lib.yang.alarms')
-
-local function collect_alarm_leaves (t, path)
-   path = path or ''
-   local visit
-   local leaves = {}
-   local function visit_leaf (v, path)
-      leaves[path] = v
-   end
-   local function is_hash (t)
-      if type(t) == 'table' then
-         for k,_ in pairs(t) do
-            if not tonumber(k) then return true end
-         end
-      end
-   end
-   local function is_array (t)
-      if type(t) == 'table' then
-         for k, v in ipairs(t) do return true end
-      end
-   end
-   local function flat_key (key)
-      local ret = {}
-      for k, v in pairs(key) do
-         table.insert(ret, '['..k..'='..v..']')
-      end
-      return table.concat(ret)
-   end
-   local function visit_array (t, path)
-      for i, v in ipairs(t) do
-         if type(v) == 'table' then
-            visit(v, path..'[position()='..i..']')
-         else
-            visit_leaf(v, path..'[position()='..i..']')
-         end
-      end
-   end
-   visit = function (t, path)
-      path = path or ''
-      for k, v in pairs(t) do
-         if is_array(v) then
-            visit_array(v, path..'/'..k)
-         elseif type(v) == 'table' then
-            if is_hash(k) then
-               visit(v, path..flat_key(k))
-            else
-               visit(v, path..'/'..k)
-            end
-         else
-            if is_hash(k) then
-               visit_leaf(v, path..flat_key(k))
-            else
-               visit_leaf(v, path..'/'..k)
-            end
-         end
-      end
-   end
-   visit(t, path)
-   return leaves
 end
 
 function selftest ()

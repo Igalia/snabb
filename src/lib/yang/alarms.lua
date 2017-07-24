@@ -2,6 +2,7 @@ module(..., package.seeall)
 
 local S = require("syscall")
 local util = require('lib.yang.util')
+local lib = require('core.lib')
 
 local csv_to_table = util.csv_to_table
 
@@ -15,7 +16,27 @@ state = {
 local alarm_list_table
 
 function get_state ()
-   return state
+   -- status-change is stored as an array while according to ietf-alarms schema
+   -- it should be a hashmap indexed by time.
+   local function transform_status_change (status_change)
+      local ret = {}
+      for _, v in pairs(status_change) do ret[v.time] = v end
+      return ret
+   end
+   local function transform_alarm_list (alarm_list)
+      local alarm = alarm_list.alarm
+      local ret = {}
+      for k,v in pairs(alarm) do
+         ret[k] = lib.deepcopy(v)
+         ret[k].status_change = transform_status_change(ret[k].status_change)
+      end
+      alarm_list.alarm = ret
+      return alarm_list
+   end
+   return {
+      alarm_inventory = state.alarm_inventory,
+      alarm_list = transform_alarm_list(state.alarm_list),
+   }
 end
 
 -- Single point access to alarm keys.
@@ -177,9 +198,9 @@ end
 local function create_status_change_if_needed (alarm, args)
    if new_status_change(alarm, args) then
       local status = {
-         time = iso_8601(),
-         perceived_severity = args.perceived_severity or alarm.perceived_severity,
-         alarm_text = args.alarm_text or alarm.alarm_text,
+         time = assert(iso_8601()),
+         perceived_severity = assert(args.perceived_severity or alarm.perceived_severity),
+         alarm_text = assert(args.alarm_text or alarm.alarm_text),
       }
       create_status_change(alarm, status)
       alarm.is_cleared = args.is_cleared
@@ -514,6 +535,15 @@ function selftest ()
       }
    ]]
 
+   local function check_status_change (alarm)
+      local status_change = alarm.status_change
+      for k, v in pairs(status_change) do
+         assert(v.perceived_severity)
+         assert(v.time)
+         assert(v.alarm_text)
+      end
+   end
+
    local filename = 'lib/yang/alarm_list.csv'
    local t = csv_to_table(filename, {sep='|'})
    assert(#t > 0)
@@ -559,14 +589,17 @@ function selftest ()
    local last_changed = alarm.last_changed
    local number_of_status_change = table_size(alarm.status_change)
    raise_alarm(key, {perceived_severity='minor'})
+   assert(alarm.perceived_severity == 'minor')
    assert(last_changed ~= alarm.last_changed)
    assert(table_size(alarm.status_change) == number_of_status_change + 1)
+   check_status_change(alarm)
 
    -- Raise alarm again with same severity. Should not produce changes.
    local alarm = state.alarm_list.alarm[key]
    local last_changed = alarm.last_changed
    local number_of_status_change = table_size(alarm.status_change)
    raise_alarm(key, {perceived_severity='minor'})
+   assert(alarm.perceived_severity == 'minor')
    assert(last_changed == alarm.last_changed)
    assert(table_size(alarm.status_change) == number_of_status_change)
 
