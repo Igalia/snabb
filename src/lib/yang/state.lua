@@ -1,6 +1,7 @@
 -- Use of this source code is governed by the Apache 2.0 license; see COPYING.
 module(..., package.seeall)
 
+local alarms = require("lib.yang.alarms")
 local lib = require("core.lib")
 local shm = require("core.shm")
 local yang = require("lib.yang.yang")
@@ -88,6 +89,11 @@ local function set_data_value(data, path, value)
    set_data_value(data[head], path, value)
 end
 
+local function collect_alarms_state (data)
+   data.softwire_state = data.softwire_state or {}
+   data.softwire_state.alarms = alarms.get_state()
+end
+
 function show_state(scm, pid)
    local schema = yang.load_schema_by_name(scm)
    local counters = find_counters(pid)
@@ -102,11 +108,22 @@ function show_state(scm, pid)
          end
       end
    end
+
+   collect_alarms_state(data)
+
    return data
 end
 
 function selftest ()
    print("selftest: lib.yang.state")
+   local t = alarms.get_state()
+   local function table_size (t)
+      local size = 0
+      for _ in pairs(t) do size = size + 1 end
+      return size
+   end
+   assert(table_size(t.alarm_inventory.alarm_type) == 2)
+
    local simple_router_schema_src = [[module snabb-simple-router {
       namespace snabb:simple-router;
       prefix simple-router;
