@@ -588,12 +588,6 @@ function Leader:rpc_get_state (args)
       return {state=printer(s, yang.string_output_file())}
    end
    local success, response = pcall(getter)
-   print('success: '..(success and 'true' or 'false'))
-   print('response: ')
-   for k, v in pairs(response) do
-      print(k, v)
-   end
-   print('end')
    if success then return response else return {status=1, error=response} end
 end
 function Leader:handle (payload)
