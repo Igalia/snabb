@@ -128,6 +128,10 @@ function memoize(f, max_occupancy)
    end
 end
 
+-- Converts a csv file to a Lua table.
+--
+-- Columns may contain multivalue data, in that case the values should be
+-- separated by hashes (#). Multivalue columns are converted to simple arrays.
 function csv_to_table (filename, opts)
    assert(filename, 'Missing filename')
    opts = opts or {}
@@ -136,7 +140,7 @@ function csv_to_table (filename, opts)
    local function split (str, sep)
       sep = sep or ';'
       local ret = {}
-      local pattern = "([^"..sep.."]+)"..sep
+      local pattern = "([^"..sep.."]+)"
       for each in str:gmatch(pattern) do
          table.insert(ret, each)
       end
@@ -164,7 +168,7 @@ function csv_to_table (filename, opts)
       elseif type == 'boolean' then
          return value:upper() == 'TRUE'
       elseif type == 'string' then
-         return value
+         return value:match('#') and split(value, '#') or value
       else
          error('Not supported type: '..type)
       end
