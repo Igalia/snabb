@@ -244,7 +244,6 @@ function raise_alarm (key, args)
    args.is_cleared = false
    key = alarm_keys:normalize(key)
    if should_update(key, args) then
-      print('create_or_update_alarm')
       create_or_update_alarm(key, args)
    end
 end
