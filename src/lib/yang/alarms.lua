@@ -117,31 +117,6 @@ function init (current_configuration)
    alarm_list_table = load_alarm_list()
 end
 
--- Helper function for pretty printing a table.
-local function pp(t, indent)
-   indent = indent or ''
-   for k,v in pairs(t) do
-      if type(v) == 'table' then
-         if type(k) == 'table' then
-            local t = {}
-            for _,v in pairs(k) do
-               if #v > 0 then table.insert(t, v) end
-            end
-            k = table.concat(t, '|')
-         end
-         io.stdout:write(k..':\n')
-         pp(v, indent..'  ')
-      else
-         if type(v) == 'boolean' then
-            v = v and 'true' or 'false'
-         elseif type(v) == 'nil' then
-               v = 'nil'
-         end
-         print(indent..k..': '..v)
-      end
-   end
-end
-
 -- Helper function for debugging purposes.
 local function show_alarm_inventory (alarm_inventory)
    local alarm_type = alarm_inventory.alarm_type or {}

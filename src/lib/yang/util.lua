@@ -194,6 +194,31 @@ function csv_to_table (filename, opts)
    return ret, size
 end
 
+-- Helper function for pretty printing a table.
+function pp(t, indent)
+   indent = indent or ''
+   for k,v in pairs(t) do
+      if type(v) == 'table' then
+         if type(k) == 'table' then
+            local t = {}
+            for _,v in pairs(k) do
+               if #v > 0 then table.insert(t, v) end
+            end
+            k = table.concat(t, '|')
+         end
+         io.stdout:write(k..':\n')
+         pp(v, indent..'  ')
+      else
+         if type(v) == 'boolean' then
+            v = v and 'true' or 'false'
+         elseif type(v) == 'nil' then
+               v = 'nil'
+         end
+         print(indent..k..': '..v)
+      end
+   end
+end
+
 function selftest()
    print('selftest: lib.yang.util')
    assert(tointeger('0') == 0)
