@@ -48,6 +48,18 @@ end
 
 state.alarm_inventory.alarm_type = load_alarm_type()
 
+function raise_alarm (key, args)
+   assert(key)
+   assert(args and not args.is_cleared)
+   print('raise alarm')
+end
+
+function clean_alarm (key, args)
+   assert(key)
+   assert(args and args.is_cleared)
+   print('clear alarm')
+end
+
 function selftest ()
    print("selftest: alarms")
    local function table_size (t)

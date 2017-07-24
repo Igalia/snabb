@@ -16,6 +16,7 @@ local lib = require("core.lib")
 local counter = require("core.counter")
 local link = require("core.link")
 local engine = require("core.app")
+local alarm_codec = require("apps.config.alarm_codec")
 
 local receive, transmit = link.receive, link.transmit
 local wr16, rd32, wr32 = lwutil.wr16, lwutil.rd32, lwutil.wr32
@@ -137,6 +138,8 @@ function ARP:maybe_send_arp_request (output)
    self.next_arp_request_time = self.next_arp_request_time or engine.now()
    if self.next_arp_request_time <= engine.now() then
       print(("ARP: Resolving '%s'"):format(ipv4:ntop(self.conf.dst_ipv4)))
+      local key = {resource='external-interface', alarm_type_id='arp-resolution'}
+      alarm_codec.raise_alarm(key)
       self:send_arp_request(output)
       self.next_arp_request_time = engine.now() + self.arp_request_interval
    end
