@@ -81,9 +81,9 @@ end
 function LoadGen:report ()
    self.dev.sync_stats()
    print(self.pciaddress,
-         "TX packets", lib.comma_value(tonumber(self.dev.stats.txpackets),
-         "TX bytes", lib.comma_value(tonumber(self.dev.stats.txbytes))
+         "TX packets", lib.comma_value(tonumber(self.dev.stats.txpackets)),
+         "TX bytes", lib.comma_value(tonumber(self.dev.stats.txbytes)))
    print(self.pciaddress,
-         "RX packets", lib.comma_value(tonumber(self.dev.stats.rxpackets),
-         "RX bytes", lib.comma_value(tonumber(self.dev.stats.rxbytes))
+         "RX packets", lib.comma_value(tonumber(self.dev.stats.rxpackets)),
+         "RX bytes", lib.comma_value(tonumber(self.dev.stats.rxbytes)))
 end
