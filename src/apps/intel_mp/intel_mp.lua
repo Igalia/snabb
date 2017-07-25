@@ -591,7 +591,7 @@ function Intel:push ()
       --   packet.free(p)
       --   counter.add(self.shm.txdrop)
       --end
-      self.transmit(p)
+      self:transmit(p)
    end
    -- Reclaim transmit contexts
    local cursor = self.tdh
