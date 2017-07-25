@@ -1,5 +1,6 @@
 module(..., package.seeall)
 
+local lib = require("core.lib")
 local util = require("lib.yang.util")
 
 local csv_to_table = util.csv_to_table
@@ -14,8 +15,26 @@ local state = {
 }
 
 function get_state ()
+   -- status-change is stored as an array while according to ietf-alarms schema
+   -- it should be a hashmap indexed by time.
+   local function transform_status_change (status_change)
+      local ret = {}
+      for _, v in pairs(status_change) do ret[v.time] = v end
+      return ret
+   end
+   local function transform_alarm_list (alarm_list)
+      local alarm = alarm_list.alarm
+      local ret = {}
+      for k,v in pairs(alarm) do
+         ret[k] = lib.deepcopy(v)
+         ret[k].status_change = transform_status_change(ret[k].status_change)
+      end
+      alarm_list.alarm = ret
+      return alarm_list
+   end
    return {
       alarm_inventory = state.alarm_inventory,
+      alarm_list = transform_alarm_list(state.alarm_list),
    }
 end
 
