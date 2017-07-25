@@ -60,8 +60,17 @@ function alarm_type_keys:fetch (...)
    return key
 end
 
+local function snabb_src ()
+   local pwd = lib.getenv("PWD")
+   if pwd then
+      local pos = pwd:match(".*/src()")
+      return pos and pwd:sub(1, pos)..'/'
+   end
+   return ""
+end
+
 function load_alarm_type (filename)
-   filename = filename or 'lib/yang/alarm_type.csv'
+   filename = filename or snabb_src()..'lib/yang/alarm_type.csv'
    local ret = {}
    for _, row in ipairs(csv_to_table(filename, {sep='|'})) do
       local key = alarm_type_keys:fetch(row.alarm_type_id, row.alarm_type_qualifier)
@@ -108,7 +117,7 @@ end
 local alarm_db
 
 local function load_alarm_db (filename)
-   filename = filename or 'lib/yang/alarm_list.csv'
+   filename = filename or snabb_src()..'lib/yang/alarm_list.csv'
    local ret = {}
    for _, row in ipairs(csv_to_table(filename, {sep='|'})) do
       local key_str = alarm_keys:normalize(row)
