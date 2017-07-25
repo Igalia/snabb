@@ -1,0 +1,3 @@
+resource          |alarm_type_id |alarm_type_qualifier|perceived_severity|alarm_text
+external-interface|arp-resolution|                    |critical          |Make sure you can resolved external-inteface.next-hop.ip from the lwAFTR.  If cannot resolve it, consider using the MAC address of the next-hop directly.  To do it so, set external-interface.next-hop.mac to the value of the MAC address.
+internal-interface|ndp-resolution|                    |critical          |Make sure you can resolved internal-inteface.next-hop.ip from the lwAFTR.  If cannot resolve it, consider using the MAC address of the next-hop directly.  To do it so, set internal-interface.next-hop.mac to the value of the MAC address.
