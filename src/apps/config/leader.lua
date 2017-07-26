@@ -19,6 +19,8 @@ local app_graph = require("core.config")
 local action_codec = require("apps.config.action_codec")
 local support = require("apps.config.support")
 local channel = require("apps.config.channel")
+local alarms = require("lib.yang.alarms")
+local alarm_codec = require("apps.config.alarm_codec")
 
 Leader = {
    config = {
@@ -548,7 +550,7 @@ function Leader:rpc_get_state (args)
       local printer = path_printer_for_schema_by_name(self.schema_name, args.path, args)
       local s = {}
       for _, follower in pairs(self.followers) do
-         for k,v in pairs(state.show_state(self.schema_name, follower.pid, args.path)) do
+         for k,v in pairs(state.show_state(self.schema_name, follower.pid)) do
             s[k] = v
          end
       end
@@ -701,11 +703,45 @@ function Leader:send_messages_to_followers()
    end
 end
 
+function Leader:receive_alarms_from_followers ()
+   for _,follower in ipairs(self.followers) do
+      self:receive_alarms_from_follower(follower)
+   end
+end
+
+function Leader:receive_alarms_from_follower (follower)
+   if not follower.alarms_channel then
+      local name = '/'..tostring(follower.pid)..'/alarms-follower-channel'
+      local success, channel = pcall(channel.open, name)
+      if not success then return end
+      follower.alarms_channel = channel
+   end
+   local channel = follower.alarms_channel
+   while true do
+      local buf, len = channel:peek_message()
+      if not buf then break end
+      local alarm = alarm_codec.decode(buf, len)
+      self:handle_alarm(follower, alarm)
+      channel:discard_message(len)
+   end
+end
+
+function Leader:handle_alarm (follower, alarm)
+   local fn, args = unpack(alarm)
+   if fn == 'raise_alarm' then
+      alarms.raise_alarm(unpack(args))
+   end
+   if fn == 'clear_alarm' then
+      alarms.clear_alarm(unpack(args))
+   end
+end
+
 function Leader:pull ()
    if app.now() < self.next_time then return end
    self.next_time = app.now() + self.period
    self:handle_calls_from_peers()
    self:send_messages_to_followers()
+   self:receive_alarms_from_followers()
 end
 
 function Leader:stop ()

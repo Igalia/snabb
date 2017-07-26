@@ -152,11 +152,11 @@ module ietf-alarms {
 
     typedef resource {
         type union {
+            type string;
             type instance-identifier {
                 require-instance false;
             }
             type yang:object-identifier;
-            type string;
         }
         description
             "This is an identification of the alarming resource, such as an
@@ -305,9 +305,13 @@ module ietf-alarms {
     /* Alarm type */
 
     typedef alarm-type-id {
+        /* FIXME: identityref is not supported, temporarily replace for string. */
+        /*
         type identityref {
             base alarm-identity;
         }
+        */
+        type string;
         description
             "Identifies an alarm type.  The description of the alarm type
             id MUST indicate if the alarm type is abstract or not.  An
