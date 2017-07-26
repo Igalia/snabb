@@ -105,4 +105,39 @@ module snabb-config-leader-v1 {
       uses error-reporting;
     }
   }
+
+  rpc compress-alarms {
+    /* XXX: Not actual input arguments specified in ietf-alarms */
+    input {
+      leaf schema { type string; mandatory true; }
+      leaf revision { type string; }
+      leaf path { type string; default "/"; }
+    }
+    output {
+      uses error-reporting;
+      leaf compressed-alarms {
+        type uint32;
+        description
+          "Number of compressed alarm entries.";
+      }
+    }
+  }
+
+  rpc purge-alarms {
+    /* XXX: Not actual input arguments specified in ietf-alarms */
+    input {
+      leaf schema { type string; mandatory true; }
+      leaf revision { type string; }
+      leaf path { type string; default "/"; }
+    }
+    output {
+      uses error-reporting;
+      leaf purged-alarms {
+        type uint32;
+        description
+          "Number of purged alarms.";
+      }
+    }
+  }
+
 }

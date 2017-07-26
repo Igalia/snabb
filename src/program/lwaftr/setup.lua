@@ -22,7 +22,10 @@ local ipv4_ntop  = require("lib.yang.util").ipv4_ntop
 local S          = require("syscall")
 local engine     = require("core.app")
 
-local capabilities = {['ietf-softwire']={feature={'binding', 'br'}}}
+local capabilities = {
+   ['ietf-softwire']={feature={'binding', 'br'}},
+   ['ietf-alarms']={feature={'operator-actions', 'alarm-shelving', 'alarm-history'}},
+}
 require('lib.yang.schema').set_default_capabilities(capabilities)
 
 local function convert_ipv4(addr)

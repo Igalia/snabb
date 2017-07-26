@@ -16,6 +16,7 @@ local lib = require("core.lib")
 local counter = require("core.counter")
 local link = require("core.link")
 local engine = require("core.app")
+local alarm_codec = require("apps.config.alarm_codec")
 
 local receive, transmit = link.receive, link.transmit
 local wr16, rd32, wr32 = lwutil.wr16, lwutil.rd32, lwutil.wr32
@@ -129,6 +130,9 @@ function ARP:new(conf)
       self.arp_request_interval = 3 -- Send a new arp_request every three seconds.
    end
    o.dst_eth = conf.dst_eth -- intentionally nil if to request via ARP
+   o.nrequests = 0
+   o.nrequests_threshold = 1
+   o.use_alarms = true
    return o
 end
 
@@ -139,11 +143,22 @@ function ARP:maybe_send_arp_request (output)
       print(("ARP: Resolving '%s'"):format(ipv4:ntop(self.conf.dst_ipv4)))
       self:send_arp_request(output)
       self.next_arp_request_time = engine.now() + self.arp_request_interval
+      -- More than 3 attempts to resolve an ARP address, raises an alarm.
+      if self.use_alarms then
+         if self.nrequests >= self.nrequests_threshold then
+            local key = {
+               resource      = 'external-interface',
+               alarm_type_id = 'arp-resolution',
+            }
+            alarm_codec.raise_alarm(key)
+         end
+      end
    end
 end
 
 function ARP:send_arp_request (output)
    transmit(output, packet.clone(self.arp_request_pkt))
+   self.nrequests = self.nrequests + 1
 end
 
 function ARP:push()

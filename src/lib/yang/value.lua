@@ -83,7 +83,7 @@ function types.empty.parse (str, what)
    return assert(str == nil, "not empty value for "..what)
 end
 function types.empty.tostring (val)
-   return ""
+   return ''
 end
 
 types.identityref = {}
@@ -95,8 +95,21 @@ function types.identityref.tostring(val)
    return val
 end
 
-types['instance-identifier'] = unimplemented('instance-identifier')
-types.leafref = unimplemented('leafref')
+types['instance-identifier'] = {}
+types['instance-identifier'].parse = function (str, what)
+   return assert(str, 'missing value for '..what)
+end
+types['instance-identifier'].tostring = function (val)
+   return val
+end
+
+types.leafref = {}
+function types.leafref.parse(str, what)
+   return assert(str, 'missing value for '..what)
+end
+function types.leafref.toleafref(val)
+   return val
+end
 
 types.string = {}
 function types.string.parse(str, what)

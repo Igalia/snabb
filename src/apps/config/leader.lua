@@ -19,6 +19,8 @@ local app_graph = require("core.config")
 local action_codec = require("apps.config.action_codec")
 local support = require("apps.config.support")
 local channel = require("apps.config.channel")
+local alarms = require("lib.yang.alarms")
+local alarm_codec = require("apps.config.alarm_codec")
 
 Leader = {
    config = {
@@ -64,6 +66,8 @@ function Leader:new (conf)
    ret.rpc_handler = rpc.dispatch_handler(ret, 'rpc_')
 
    ret:set_initial_configuration(conf.initial_configuration)
+   ret.pending_alarms = {}
+   ret:init_alarms()
 
    return ret
 end
@@ -114,6 +118,10 @@ function Leader:rpc_describe (args)
             capability = schema.get_default_capabilities() }
 end
 
+function Leader:init_alarms ()
+   alarms.init(self.current_configuration)
+end
+
 local function path_printer_for_grammar(grammar, path, opts)
    local getter, subgrammar = path_mod.resolver(grammar, path)
    local printer
@@ -143,6 +151,30 @@ function Leader:rpc_get_config (args)
       local printer = path_printer_for_schema_by_name(args.schema, args.path, args)
       local config = printer(self.current_configuration, yang.string_output_file())
       return { config = config }
+   end
+   local success, response = pcall(getter)
+   if success then return response else return {status=1, error=response} end
+end
+
+function Leader:rpc_compress_alarms (args)
+   local function getter()
+      if args.schema ~= self.schema_name then
+         return false, ("Compress-alarms operation not supported in"..
+                        "'%s' schema"):format(args.schema)
+      end
+      return { compressed_alarms = alarms.compress_alarms() }
+   end
+   local success, response = pcall(getter)
+   if success then return response else return {status=1, error=response} end
+end
+
+function Leader:rpc_purge_alarms (args)
+   local function getter()
+      if args.schema ~= self.schema_name then
+         return false, ("Purge-alarms operation not supported in"..
+                        "'%s' schema"):format(args.schema)
+      end
+      return { purged_alarms = alarms.purge_alarms() }
    end
    local success, response = pcall(getter)
    if success then return response else return {status=1, error=response} end
@@ -545,10 +577,11 @@ function Leader:rpc_get_state (args)
       if args.schema ~= self.schema_name then
             return self:foreign_rpc_get_state(args.schema, args.path, args)
       end
+      print('schema-name: '..self.schema_name)
       local printer = path_printer_for_schema_by_name(self.schema_name, args.path, args)
       local s = {}
       for _, follower in pairs(self.followers) do
-         for k,v in pairs(state.show_state(self.schema_name, follower.pid, args.path)) do
+         for k,v in pairs(state.show_state(self.schema_name, follower.pid)) do
             s[k] = v
          end
       end
@@ -701,11 +734,56 @@ function Leader:send_messages_to_followers()
    end
 end
 
+function Leader:receive_alarms_from_followers ()
+   for _,follower in ipairs(self.followers) do
+      self:receive_alarms_from_follower(follower)
+   end
+end
+
+function Leader:send_pending_alarms (follower)
+   if follower.channel then
+      local channel = follower.channel
+      local action = {'send_pending_alarms',{}}
+      local buf, len = action_codec.encode(action)
+      channel:put_message(buf, len)
+      buf, len = action_codec.encode({'commit', {}})
+      channel:put_message(buf, len)
+   end
+end
+
+function Leader:receive_alarms_from_follower (follower)
+   if not follower.alarms_channel then
+      local name = '/'..tostring(follower.pid)..'/alarms-follower-channel'
+      local success, channel = pcall(channel.open, name)
+      if not success then return end
+      follower.alarms_channel = channel
+   end
+   local channel = follower.alarms_channel
+   while true do
+      local buf, len = channel:peek_message()
+      if not buf then break end
+      local alarm = alarm_codec.decode(buf, len)
+      self:handle_alarm(follower, alarm)
+      channel:discard_message(len)
+   end
+end
+
+function Leader:handle_alarm (follower, alarm)
+   local fn, args = unpack(alarm)
+   if fn == 'raise_alarm' then
+      alarms.raise_alarm(unpack(args))
+   end
+   if fn == 'clear_alarm' then
+      alarms.clear_alarm(unpack(args))
+   end
+end
+
 function Leader:pull ()
    if app.now() < self.next_time then return end
    self.next_time = app.now() + self.period
    self:handle_calls_from_peers()
    self:send_messages_to_followers()
+   self:receive_alarms_from_followers()
 end
 
 function Leader:stop ()

@@ -128,6 +128,97 @@ function memoize(f, max_occupancy)
    end
 end
 
+-- Converts a csv file to a Lua table.
+--
+-- Columns may contain multivalue data, in that case the values should be
+-- separated by hashes (#). Multivalue columns are converted to simple arrays.
+function csv_to_table (filename, opts)
+   assert(filename, 'Missing filename')
+   opts = opts or {}
+   local sep = opts.sep or ';'
+   local fields = opts.fields
+   local function split (str, sep)
+      sep = sep or ';'
+      local ret = {}
+      local pattern = "([^"..sep.."]+)"
+      for each in str:gmatch(pattern) do
+         table.insert(ret, each)
+      end
+      return ret
+   end
+   local function trim (str)
+      str = str or ''
+      str = str:gsub("^%s+", "")
+      str = str:gsub("%s+$", "")
+      return str
+   end
+   local function parse_line (line)
+      local ret = {}
+      for _, val in ipairs(split(line, sep)) do
+         table.insert(ret, trim(val))
+      end
+      return ret
+   end
+   local function parse_value (value)
+      local type = type(value)
+      if type == 'nil' then
+         return nil
+      elseif type == 'number' then
+         return tonumber(value)
+      elseif type == 'boolean' then
+         return value:upper() == 'TRUE'
+      elseif type == 'string' then
+         return value:match('#') and split(value, '#') or value
+      else
+         error('Not supported type: '..type)
+      end
+   end
+   local ret = {}
+   local lineno = 0
+   for line in io.lines(filename) do
+      lineno = lineno + 1
+      if lineno == 1 then
+         fields = parse_line(line)
+         goto continue
+      end
+      local values = parse_line(line)
+      local row = {}
+      for i=1,#fields do
+         local field, value = fields[i], values[i]
+         row[field] = parse_value(value)
+      end
+      table.insert(ret, row)
+      ::continue::
+   end
+   local size = lineno - 1
+   return ret, size
+end
+
+-- Helper function for pretty printing a table.
+function pp(t, indent)
+   indent = indent or ''
+   for k,v in pairs(t) do
+      if type(v) == 'table' then
+         if type(k) == 'table' then
+            local t = {}
+            for _,v in pairs(k) do
+               if #v > 0 then table.insert(t, v) end
+            end
+            k = table.concat(t, '|')
+         end
+         io.stdout:write(k..':\n')
+         pp(v, indent..'  ')
+      else
+         if type(v) == 'boolean' then
+            v = v and 'true' or 'false'
+         elseif type(v) == 'nil' then
+               v = 'nil'
+         end
+         print(indent..k..': '..v)
+      end
+   end
+end
+
 function selftest()
    print('selftest: lib.yang.util')
    assert(tointeger('0') == 0)
