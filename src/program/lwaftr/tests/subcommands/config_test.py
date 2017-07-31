@@ -155,8 +155,8 @@ class TestConfigMisc(BaseTestCase):
         get_state_args = self.get_cmd_args('get-state')
         # Select a few at random which should have non-zero results.
         for query in (
-                '/softwire-state/in-ipv4-bytes',
-                '/softwire-state/out-ipv4-bytes',
+                '/softwire-state/counters/in-ipv4-bytes',
+                '/softwire-state/counters/out-ipv4-bytes',
             ):
             cmd_args = list(get_state_args)
             cmd_args.append(query)
