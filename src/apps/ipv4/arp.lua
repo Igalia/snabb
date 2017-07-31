@@ -24,6 +24,11 @@ local C = ffi.C
 local receive, transmit = link.receive, link.transmit
 local htons, ntohs = lib.htons, lib.ntohs
 
+event = {
+   arp_resolving = 'arp-resolving',
+   arp_resolved = 'arp-resolved',
+}
+
 local ether_header_t = ffi.typeof [[
 /* All values in network byte order.  */
 struct {
@@ -132,23 +137,30 @@ local arp_config_params = {
 }
 
 function ARP:new(conf)
-   local o = lib.parse(conf, arp_config_params)
+   local o = setmetatable(lib.parse(conf, arp_config_params), {__index=ARP})
    if not o.self_mac then
       o.self_mac = random_locally_administered_unicast_mac_address()
    end
    if not o.next_mac then
       assert(o.next_ip, 'ARP needs next-hop IPv4 address to learn next-hop MAC')
       o.arp_request_pkt = make_arp_request(o.self_mac, o.self_ip, o.next_ip)
-      self.arp_request_interval = 3 -- Send a new arp_request every three seconds.
+      o.arp_request_interval = 3 -- Send a new arp_request every three seconds.
    end
-   return setmetatable(o, {__index=ARP})
+   o.event_listeners = {}
+   o:add_event_listener(event.arp_resolved, function (ip, mac)
+      print(("ARP: '%s' resolved (%s)"):format(ipv4:ntop(ip),ethernet:ntop(mac)))
+   end)
+   o:add_event_listener(event.arp_resolving, function (ip)
+      print(("ARP: Resolving '%s'"):format(ipv4:ntop(ip)))
+   end)
+   return o
 end
 
 function ARP:maybe_send_arp_request (output)
    if self.next_mac then return end
    self.next_arp_request_time = self.next_arp_request_time or engine.now()
    if self.next_arp_request_time <= engine.now() then
-      print(("ARP: Resolving '%s'"):format(ipv4:ntop(self.next_ip)))
+      self:emit_event(event.arp_resolving, self.next_ip)
       self:send_arp_request(output)
       self.next_arp_request_time = engine.now() + self.arp_request_interval
    end
@@ -156,6 +168,20 @@ end
 
 function ARP:send_arp_request (output)
    transmit(output, packet.clone(self.arp_request_pkt))
+end
+
+function ARP:add_event_listener (name, cb)
+   if not self.event_listeners[name] then
+      self.event_listeners[name] = {}
+   end
+   table.insert(self.event_listeners[name], cb)
+end
+
+function ARP:emit_event (name, ...)
+   local listeners = self.event_listeners[name] or {}
+   for _, cb in ipairs(listeners) do
+      cb(...)
+   end
 end
 
 function ARP:push()
@@ -183,9 +209,7 @@ function ARP:push()
          elseif ntohs(h.arp.oper) == arp_oper_reply then
             if ipv4_eq(h.arp.spa, self.next_ip, 4) then
                local next_mac = copy_mac(h.arp.sha)
-               print(string.format("ARP: '%s' resolved (%s)",
-                                   ipv4:ntop(self.next_ip),
-                                   ethernet:ntop(next_mac)))
+               self:emit_event(event.arp_resolved, self.next_ip, next_mac)
                self.next_mac = next_mac
             end
          else
