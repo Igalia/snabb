@@ -158,7 +158,6 @@ function run(args)
    end
 
    if opts.reconfigurable then
-      conf.alarm_notification = true
       setup.reconfigurable(scheduling, setup_fn, c, conf, unpack(setup_args))
    else
       setup.apply_scheduling(scheduling)
