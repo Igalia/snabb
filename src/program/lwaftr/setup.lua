@@ -24,6 +24,8 @@ local ipv4_ntop  = require("lib.yang.util").ipv4_ntop
 local S          = require("syscall")
 local engine     = require("core.app")
 
+local alarm_notification = false
+
 local capabilities = {['ietf-softwire']={feature={'binding', 'br'}}}
 require('lib.yang.schema').set_default_capabilities(capabilities)
 
@@ -89,7 +91,8 @@ function lwaftr_app(c, conf)
               { self_ip = convert_ipv4(external_interface.ip),
                 self_mac = external_interface.mac,
                 next_mac = external_interface.next_hop.mac,
-                next_ip = convert_ipv4(external_interface.next_hop.ip) })
+                next_ip = convert_ipv4(external_interface.next_hop.ip),
+                alarm_notification = alarm_notification })
 
    local preprocessing_apps_v4  = { "reassemblerv4" }
    local preprocessing_apps_v6  = { "reassemblerv6" }
@@ -550,6 +553,9 @@ end
 
 function reconfigurable(scheduling, f, graph, conf, ...)
    local args = {...}
+
+   -- Always enabled in reconfigurable mode.
+   alarm_notification = true
 
    local function setup_fn(conf)
       local graph = config.new()

@@ -15,6 +15,7 @@ local lib = require("core.lib")
 local counter = require("core.counter")
 local link = require("core.link")
 local engine = require("core.app")
+local alarm_codec = require("apps.config.alarm_codec")
 
 local receive, transmit = link.receive, link.transmit
 local wr16, rd32, wr32 = lwutil.wr16, lwutil.rd32, lwutil.wr32
