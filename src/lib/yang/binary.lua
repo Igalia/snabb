@@ -233,11 +233,8 @@ local function data_emitter(production)
          end
       end
    end
-   local native_types = {
-      enumeration = true,
-      identityref = true,
-      string = true,
-   }
+   local native_types = util.set('enumeration', 'identityref', 'instance-identifier',
+                                 'leafref', 'string')
    function handlers.scalar(production)
       local primitive_type = production.argument_type.primitive_type
       local type = assert(value.types[primitive_type], "unsupported type: "..primitive_type)
@@ -246,6 +243,11 @@ local function data_emitter(production)
          return function(data, stream)
             stream:write_stringref('stringref')
             stream:write_stringref(data)
+         end
+      elseif primitive_type == 'empty' then
+         return function (data, stream)
+            stream:write_stringref('stringref')
+            stream:write_stringref('')
          end
       elseif type.ctype then
          local ctype = type.ctype
@@ -503,6 +505,12 @@ function selftest()
             }
          }
       }
+
+      container foo {
+         leaf enable-qos {
+            type empty;
+         }
+      }
    }]])
    local data = data.load_data_for_schema(test_schema, [[
       is-active true;
@@ -519,6 +527,9 @@ function selftest()
       }
       next-hop {
          ipv4 5.6.7.8;
+      }
+      foo {
+         enable-qos;
       }
    ]])
 
