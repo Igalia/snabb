@@ -128,6 +128,13 @@ function memoize(f, max_occupancy)
    end
 end
 
+-- XXX: lib/ctable.lua also defines set. Consider moving this function to core/lib.lua.
+function set(...)
+   local ret = {}
+   for k, v in pairs({...}) do ret[v] = true end
+   return ret
+end
+
 function selftest()
    print('selftest: lib.yang.util')
    assert(tointeger('0') == 0)

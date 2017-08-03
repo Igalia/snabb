@@ -583,11 +583,7 @@ local function schema_from_ast(ast)
    return ret
 end
 
-local function set(...)
-   local ret = {}
-   for k, v in pairs({...}) do ret[v] = true end
-   return ret
-end
+local set = util.set
 
 local primitive_types = set(
    'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64',
