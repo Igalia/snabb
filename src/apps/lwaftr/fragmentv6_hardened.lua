@@ -197,7 +197,7 @@ local function attempt_reassembly(frags_table, reassembly_buf, fragment)
    local restatus = reassembly_status(reassembly_buf)
    if restatus == REASSEMBLY_OK then
       local reassembled_packet = packet.from_pointer(
-	 reassembly_buf.reassembly_data, reassembly_buf.reassembly_length)
+         reassembly_buf.reassembly_data, reassembly_buf.reassembly_length)
       free_reassembly_buf_and_pkt(fragment, frags_table)
       return REASSEMBLY_OK, reassembled_packet
    else

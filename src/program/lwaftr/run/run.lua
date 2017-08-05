@@ -114,7 +114,7 @@ function parse_args(args)
       if opts.virtio_net then
          fatal("setting --ring-buffer-size does not work with --virtio")
       end
-      require("apps.intel.intel10g").ring_buffer_size(ring_buffer_size)
+      opts.ring_buffer_size = ring_buffer_size
    end
    if not conf_file then fatal("Missing required --conf argument.") end
    if opts.mirror then
@@ -201,8 +201,8 @@ function run(args)
             csv:add_app('v4v6', { 'v4', 'v4' }, { tx=ipv4_tx, rx=ipv4_rx })
             csv:add_app('v4v6', { 'v6', 'v6' }, { tx=ipv6_tx, rx=ipv6_rx })
          else
-            csv:add_app('inetNic', { 'tx', 'rx' }, { tx=ipv4_tx, rx=ipv4_rx })
-            csv:add_app('b4sideNic', { 'tx', 'rx' }, { tx=ipv6_tx, rx=ipv6_rx })
+            csv:add_app('inetNic', { 'output', 'input' }, { tx=ipv4_tx, rx=ipv4_rx })
+            csv:add_app('b4sideNic', { 'output', 'input' }, { tx=ipv6_tx, rx=ipv6_rx })
          end
          csv:activate()
       end

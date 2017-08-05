@@ -34,7 +34,7 @@ local invalid_header_id = 0xffff
    - VIRTIO_NET_F_CSUM - enables the SG I/O (resulting in
       multiple chained data buffers in our TX path(self.rxring))
       Required by GSO/TSO/USO. Requires CSUM offload support in the
-      HW driver (now intel10g)
+      HW driver (now intel_mp)
 
    - VIRTIO_NET_F_MRG_RXBUF - enables multiple chained buffers in our RX path
       (self.txring). Also chnages the virtio_net_hdr to virtio_net_hdr_mrg_rxbuf
@@ -264,7 +264,7 @@ end
 
 function VirtioNetDevice:tx_packet_start_mrg_rxbuf(addr, len)
    local tx_mrg_hdr = ffi.cast(virtio_net_hdr_mrg_rxbuf_type, self:map_from_guest(addr))
-   local l = self.owner.input.rx
+   local l = self.owner.input.rx or self.owner.input.input
    local tx_p = self.tx.p
    ffi.fill(tx_mrg_hdr, virtio_net_hdr_mrg_rxbuf_size)
 
