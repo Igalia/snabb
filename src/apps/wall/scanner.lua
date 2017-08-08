@@ -6,10 +6,9 @@ local lib   = require("core.lib")
 local bit   = require("bit")
 local ffi   = require("ffi")
 
-local rd16, rd32 = util.rd16, util.rd32
+local rd16 = util.rd16
 local ipv4_addr_cmp, ipv6_addr_cmp = util.ipv4_addr_cmp, util.ipv6_addr_cmp
-local tobit, lshift, rshift = bit.tobit, bit.lshift, bit.rshift
-local band, bxor, bnot = bit.band, bit.bxor, bit.bnot
+local band = bit.band
 local ETH_TYPE_IPv4         = const.ETH_TYPE_IPv4
 local ETH_TYPE_IPv6         = const.ETH_TYPE_IPv6
 local ETH_TYPE_VLAN         = const.ETH_TYPE_VLAN
@@ -36,8 +35,8 @@ local TCP_DST_PORT_OFFSET   = const.TCP_DST_PORT_OFFSET
 local UDP_SRC_PORT_OFFSET   = const.UDP_SRC_PORT_OFFSET
 local UDP_DST_PORT_OFFSET   = const.UDP_DST_PORT_OFFSET
 
-ffi.cdef [[
-   struct swall_flow_key_ipv4 {
+local swall_flow_key_ipv4_t = ffi.typeof([[
+   struct {
       uint16_t vlan_id;
       uint8_t  __pad;
       uint8_t  ip_proto;
@@ -45,9 +44,11 @@ ffi.cdef [[
       uint8_t  hi_addr[4];
       uint16_t lo_port;
       uint16_t hi_port;
-   } __attribute__((packed));
+   } __attribute__((packed))
+]])
 
-   struct swall_flow_key_ipv6 {
+local swall_flow_key_ipv6_t = ffi.typeof([[
+   struct {
       uint16_t vlan_id;
       uint8_t  __pad;
       uint8_t  ip_proto;
@@ -55,52 +56,18 @@ ffi.cdef [[
       uint8_t  hi_addr[16];
       uint16_t lo_port;
       uint16_t hi_port;
-   } __attribute__((packed));
-]]
+   } __attribute__((packed))
+]])
 
-local function hash32(i32)
-   i32 = tobit(i32)
-   i32 = i32 + bnot(lshift(i32, 15))
-   i32 = bxor(i32, (rshift(i32, 10)))
-   i32 = i32 + lshift(i32, 3)
-   i32 = bxor(i32, rshift(i32, 6))
-   i32 = i32 + bnot(lshift(i32, 11))
-   i32 = bxor(i32, rshift(i32, 16))
-   return i32
+local function flow_key_ipv4 ()
+   return ffi.new(swall_flow_key_ipv4_t)
 end
-
-local uint32_ptr_t = ffi.typeof("uint32_t*")
-local function make_cdata_hash_function(sizeof)
-   assert(sizeof >= 4)
-   assert(sizeof % 4 == 0)
-
-   local rounds = (sizeof / 4) - 1
-   return function (cdata)
-      cdata = ffi.cast(uint32_ptr_t, cdata)
-      local h = hash32(cdata[0])
-      for i = 1, rounds do
-         h = hash32(bxor(h, hash32(cdata[i])))
-      end
-      return h
-   end
-end
-
-
-local flow_key_ipv4 = ffi.metatype("struct swall_flow_key_ipv4", {
-   __index = {
-      hash = make_cdata_hash_function(ffi.sizeof("struct swall_flow_key_ipv4")),
-      eth_type = function (self) return ETH_TYPE_IPv4 end,
-   }
-})
 
 local the_flow_key_ipv4 = flow_key_ipv4()
 
-local flow_key_ipv6 = ffi.metatype("struct swall_flow_key_ipv6", {
-   __index = {
-      hash = make_cdata_hash_function(ffi.sizeof("struct swall_flow_key_ipv6")),
-      eth_type = function (self) return ETH_TYPE_IPv6 end,
-   }
-})
+local function flow_key_ipv6 ()
+   return ffi.new(swall_flow_key_ipv6_t)
+end
 
 local the_flow_key_ipv6 = flow_key_ipv6()
 
@@ -255,6 +222,7 @@ end
 function selftest()
    local ipv6 = require("lib.protocol.ipv6")
    local ipv4 = require("lib.protocol.ipv4")
+   local cltable = require('lib.cltable')
 
    do -- Test comparison of IPv6 addresses
       assert(ipv6_addr_cmp(ipv6:pton("2001:fd::1"),
@@ -294,11 +262,16 @@ function selftest()
          key.hi_port = 1010
          return key
       end
+      local cltab = cltable.new({key_type=swall_flow_key_ipv4_t})
       local k = make_ipv4_key()
-      assert(k:hash() == make_ipv4_key():hash())
-      -- Changing any value makes the hash vary
+      assert(not cltab[k])
+      cltab[k] = 'hi'
+      -- Return same value as keys produce same hash.
+      assert(cltab[k] == cltab[make_ipv4_key()])
+      -- Changing any value makes the hash vary.
       k.lo_port = 2020
-      assert(k:hash() ~= make_ipv4_key():hash())
+      assert(not cltab[k])
+      assert(cltab[make_ipv4_key()])
    end
 
    do -- Test hashing of IPv6 flow keys
@@ -312,11 +285,16 @@ function selftest()
          key.hi_port = 3030
          return key
       end
+      local cltab = cltable.new({key_type=swall_flow_key_ipv6_t})
       local k = make_ipv6_key()
-      assert(k:hash() == make_ipv6_key():hash())
-      -- Changing any value makes the hash vary
-      k.lo_port = IPv6_NEXTHDR_UDP
-      assert(k:hash() ~= make_ipv6_key():hash())
+      assert(not cltab[k])
+      cltab[k] = 'hi'
+      -- Return same value as keys produce same hash.
+      assert(cltab[k] == cltab[make_ipv6_key()])
+      -- Changing any value makes the hash vary.
+      k.lo_port = 2020
+      assert(not cltab[k])
+      assert(cltab[make_ipv6_key()])
    end
 
    do -- Test Scanner:extract_packet_info()
