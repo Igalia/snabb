@@ -35,7 +35,7 @@ local TCP_DST_PORT_OFFSET   = const.TCP_DST_PORT_OFFSET
 local UDP_SRC_PORT_OFFSET   = const.UDP_SRC_PORT_OFFSET
 local UDP_DST_PORT_OFFSET   = const.UDP_DST_PORT_OFFSET
 
-local swall_flow_key_ipv4_t = ffi.typeof([[
+swall_flow_key_ipv4_t = ffi.typeof([[
    struct {
       uint16_t vlan_id;
       uint8_t  __pad;
@@ -44,10 +44,11 @@ local swall_flow_key_ipv4_t = ffi.typeof([[
       uint8_t  hi_addr[4];
       uint16_t lo_port;
       uint16_t hi_port;
+      uint16_t eth_type;
    } __attribute__((packed))
 ]])
 
-local swall_flow_key_ipv6_t = ffi.typeof([[
+swall_flow_key_ipv6_t = ffi.typeof([[
    struct {
       uint16_t vlan_id;
       uint8_t  __pad;
@@ -56,6 +57,7 @@ local swall_flow_key_ipv6_t = ffi.typeof([[
       uint8_t  hi_addr[16];
       uint16_t lo_port;
       uint16_t hi_port;
+      uint16_t eth_type;
    } __attribute__((packed))
 ]])
 
@@ -164,6 +166,7 @@ function Scanner:extract_packet_info(p)
          src_port = rd16(p.data + ip_payload_offset + UDP_SRC_PORT_OFFSET)
          dst_port = rd16(p.data + ip_payload_offset + UDP_DST_PORT_OFFSET)
       end
+      key.eth_type = ETH_TYPE_IPv4
    elseif eth_type == ETH_TYPE_IPv6 then
       key = the_flow_key_ipv6
       src_addr = p.data + ip_offset + IPv6_SRC_ADDR_OFFSET
@@ -185,6 +188,7 @@ function Scanner:extract_packet_info(p)
          src_port = rd16(proto_header_ptr + UDP_SRC_PORT_OFFSET)
          dst_port = rd16(proto_header_ptr + UDP_DST_PORT_OFFSET)
       end
+      key.eth_type = ETH_TYPE_IPv6
    else
       return nil
    end

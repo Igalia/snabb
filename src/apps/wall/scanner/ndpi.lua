@@ -3,6 +3,7 @@ local const   = require("apps.wall.constants")
 local opt     = require("apps.wall.scanner.ndpi_opt")
 local util    = require("apps.wall.util")
 local ndpi    = require("ndpi")
+local cltable = require("lib.cltable")
 
 local rd32, ipv4_addr_cmp, ipv6_addr_cmp = util.rd32, util.ipv4_addr_cmp, util.ipv6_addr_cmp
 local ETH_TYPE_IPv4  = const.ETH_TYPE_IPv4
@@ -38,21 +39,30 @@ function NdpiScanner:new(ticks_per_second)
    local s = NdpiScanner:superClass().new(self)
    s.protocols = ndpi.protocol_bitmask():set_all()
    s._ndpi     = ndpi.detection_module(ticks_per_second or 1000):set_protocol_bitmask(s.protocols)
-   s._flows    = {}
+   s._flowsv4  = cltable.new({key_type=scanner.swall_flow_key_ipv4_t})
+   s._flowsv6  = cltable.new({key_type=scanner.swall_flow_key_ipv6_t})
    return s
 end
 
-
 function NdpiScanner:get_flow(p)
-   local key = (self:extract_packet_info(p))
-   return key and self._flows[key:hash()] or nil
+   local key = self:extract_packet_info(p)
+   return self:get_flow_by_key(key), key
+end
+
+function NdpiScanner:get_flow_by_key (key)
+   if key and key.eth_type == ETH_TYPE_IPv4 then return self._flowsv4[key] end
+   if key and key.eth_type == ETH_TYPE_IPv6 then return self._flowsv6[key] end
 end
 
 function NdpiScanner:flows()
-   local flows = self._flows
+   local flowsv4 = self._flowsv4
+   local flowsv6 = self._flowsv6
    return coroutine.wrap(function ()
-      for _, flow in pairs(flows) do
-         coroutine.yield(flow)
+      for key, flow in cltable.pairs(flowsv4) do
+         coroutine.yield(flow, key)
+      end
+      for key, flow in cltable.pairs(flowsv6) do
+         coroutine.yield(flow, key)
       end
    end)
 end
@@ -65,6 +75,13 @@ function NdpiScanner:protocol_name(protocol)
    return name
 end
 
+function NdpiScanner:add_flow (key)
+   local flow = NdpiFlow:new(key)
+   if key.eth_type == ETH_TYPE_IPv4 then self._flowsv4[key] = flow end
+   if key.eth_type == ETH_TYPE_IPv6 then self._flowsv6[key] = flow end
+   return flow
+end
+
 -- FIXME: Overall this needs checking for packet boundaries and sizes
 function NdpiScanner:scan_packet(p, time)
    -- Extract packet information
@@ -74,11 +91,9 @@ function NdpiScanner:scan_packet(p, time)
    end
 
    -- Get an existing data flow or create a new one
-   local key_hash = key:hash()
-   local flow = self._flows[key_hash]
+   local flow = self:get_flow_by_key(key)
    if not flow then
-      flow = NdpiFlow:new(key)
-      self._flows[key_hash] = flow
+      flow = self:add_flow(key)
    end
 
    flow:update_counters(time)
@@ -87,14 +102,14 @@ function NdpiScanner:scan_packet(p, time)
    end
 
    local src_id, dst_id = flow._ndpi_src_id, flow._ndpi_dst_id
-   if key:eth_type() == ETH_TYPE_IPv4 then
+   if key.eth_type == ETH_TYPE_IPv4 then
       if ipv4_addr_cmp(src_addr, key.lo_addr) ~= 0 or
          ipv4_addr_cmp(dst_addr, key.hi_addr) ~= 0 or
          src_port ~= key.lo_port or dst_port ~= key.hi_port
       then
          src_id, dst_id = dst_id, src_id
       end
-   elseif key:eth_type() == ETH_TYPE_IPv6 then
+   elseif key.eth_type == ETH_TYPE_IPv6 then
       if ipv6_addr_cmp(src_addr, key.lo_addr) ~= 0 or
          ipv6_addr_cmp(dst_addr, key.hi_addr) ~= 0 or
          src_port ~= key.lo_port or dst_port ~= key.hi_port
