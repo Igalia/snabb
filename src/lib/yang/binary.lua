@@ -244,6 +244,11 @@ local function data_emitter(production)
             stream:write_stringref('stringref')
             stream:write_stringref(data)
          end
+      elseif primitive_type == 'empty' then
+         return function (data, stream)
+            stream:write_stringref('flag')
+            stream:write_uint32(data and 1 or 0)
+         end
       elseif type.ctype then
          local ctype = type.ctype
          local emit_value = value_emitter(ctype)
@@ -414,6 +419,10 @@ local function read_compiled_data(stream, strtab)
       local ctype = scalar_type(read_string())
       return stream:read_ptr(ctype)[0]
    end
+   function readers.flag()
+      if stream:read_uint32() ~= 0 then return true end
+      return nil
+   end
    return read1()
 end
 
@@ -500,6 +509,12 @@ function selftest()
             }
          }
       }
+
+      container foo {
+         leaf enable-qos {
+            type empty;
+         }
+      }
    }]])
    local data = data.load_data_for_schema(test_schema, [[
       is-active true;
@@ -516,6 +531,9 @@ function selftest()
       }
       next-hop {
          ipv4 5.6.7.8;
+      }
+      foo {
+         enable-qos;
       }
    ]])
 
