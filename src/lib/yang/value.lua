@@ -95,8 +95,21 @@ function types.identityref.tostring(val)
    return val
 end
 
-types['instance-identifier'] = unimplemented('instance-identifier')
-types.leafref = unimplemented('leafref')
+types['instance-identifier'] = {}
+types['instance-identifier'].parse = function (str, what)
+   return assert(str, 'missing value for '..what)
+end
+types['instance-identifier'].tostring = function (val)
+   error("NYI: instance-identifier")
+end
+
+types.leafref = {}
+function types.leafref.parse(str, what)
+   return assert(str, 'missing value for '..what)
+end
+function types.leafref.tostring(val)
+   error("NYI: leafref")
+end
 
 types.string = {}
 function types.string.parse(str, what)
