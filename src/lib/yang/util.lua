@@ -128,6 +128,14 @@ function memoize(f, max_occupancy)
    end
 end
 
+function readfile (filename)
+   local fd, errno = io.open(filename, "rt")
+   if not fd then error(errno) end
+   local ret = fd:read("*a")
+   fd:close()
+   return ret
+end
+
 function selftest()
    print('selftest: lib.yang.util')
    assert(tointeger('0') == 0)
