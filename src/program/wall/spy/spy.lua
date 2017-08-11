@@ -24,36 +24,40 @@ local function printf(fmt, ...)
    io.write(fmt:format(...))
 end
 
-local function report_flow(scanner, flow)
-   local lo_addr, hi_addr = "<unknown>", "<unknown>"
-   local eth_type = flow.key:eth_type()
+local function key (flow)
+   for k,_ in pairs(flow) do return k end
+end
+
+local function report_flow(scanner, flow, key)
+   local lo_addr, hi_addr = "<unkeynown>", "<unkeynown>"
+   local eth_type = key.eth_type
    if eth_type == const.ETH_TYPE_IPv4 then
-      lo_addr = ipv4:ntop(flow.key.lo_addr)
-      hi_addr = ipv4:ntop(flow.key.hi_addr)
+      lo_addr = ipv4:ntop(key.lo_addr)
+      hi_addr = ipv4:ntop(key.hi_addr)
    elseif eth_type == const.ETH_TYPE_IPv6 then
-      lo_addr = ipv6:ntop(flow.key.lo_addr)
-      hi_addr = ipv6:ntop(flow.key.hi_addr)
+      lo_addr = ipv6:ntop(key.lo_addr)
+      hi_addr = ipv6:ntop(key.hi_addr)
    end
 
-   if flow.proto_master ~= proto.PROTOCOL_UNKNOWN then
-      printf("%#010x %4dp %15s:%-5d - %15s:%-5d  %s:%s\n",
-         flow.key:hash(), flow.packets,
-         lo_addr, ntohs(flow.key.lo_port),
-         hi_addr, ntohs(flow.key.hi_port),
+   if flow.proto_master ~= proto.PROTOCOL_UNkeyNOWN then
+      printf("%4dp %15s:%-5d - %15s:%-5d  %s:%s\n",
+         flow.packets,
+         lo_addr, ntohs(key.lo_port),
+         hi_addr, ntohs(key.hi_port),
          scanner:protocol_name(flow.protocol),
          scanner:protocol_name(flow.proto_master))
    else
-      printf("%#010x %4dp %15s:%-5d - %15s:%-5d  %s\n",
-         flow.key:hash(), flow.packets,
-         lo_addr, ntohs(flow.key.lo_port),
-         hi_addr, ntohs(flow.key.hi_port),
+      printf("%4dp %15s:%-5d - %15s:%-5d  %s\n",
+         flow.packets,
+         lo_addr, ntohs(key.lo_port),
+         hi_addr, ntohs(key.hi_port),
          scanner:protocol_name(flow.protocol))
    end
 end
 
 local function report_summary(scanner)
-   for flow in scanner:flows() do
-      report_flow(scanner, flow)
+   for flow, key in scanner:flows() do
+      report_flow(scanner, flow, key)
    end
 end
 
@@ -65,11 +69,11 @@ function LiveReporter:new (scanner)
 end
 
 function LiveReporter:on_northbound_packet (p)
-   local flow = self.scanner:get_flow(p)
+   local flow, key = self.scanner:get_flow(p)
    if flow and not flow.reported then
       local proto = self.scanner:protocol_name(flow.protocol)
       if proto:lower() ~= "unknown" then
-         report_flow(self.scanner, flow)
+         report_flow(self.scanner, flow, key)
          flow.reported = true
       end
    end
