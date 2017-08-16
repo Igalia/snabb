@@ -29,7 +29,7 @@ local function key (flow)
 end
 
 local function report_flow(scanner, flow, key)
-   local lo_addr, hi_addr = "<unkeynown>", "<unkeynown>"
+   local lo_addr, hi_addr = "<unknown>", "<unknown>"
    local eth_type = key.eth_type
    if eth_type == const.ETH_TYPE_IPv4 then
       lo_addr = ipv4:ntop(key.lo_addr)
@@ -39,7 +39,7 @@ local function report_flow(scanner, flow, key)
       hi_addr = ipv6:ntop(key.hi_addr)
    end
 
-   if flow.proto_master ~= proto.PROTOCOL_UNkeyNOWN then
+   if flow.proto_master ~= proto.PROTOCOL_UNKNOWN then
       printf("%4dp %15s:%-5d - %15s:%-5d  %s:%s\n",
          flow.packets,
          lo_addr, ntohs(key.lo_port),
