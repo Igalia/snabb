@@ -27,20 +27,14 @@ local default_headroom = 256
 -- The Intel82599 driver requires even-byte alignment, so let's keep
 -- things aligned at least this much.
 local minimum_alignment = 2
+local valid_headroom_mask = bit.band(packet_alignment - 1,
+                                     bit.bnot(minimum_alignment - 1))
 
-local function get_alignment (addr, alignment)
-   -- Precondition: alignment is a power of 2.
-   return bit.band(addr, alignment - 1)
-end
 local function get_headroom (ptr)
-   return get_alignment(ffi.cast("uint64_t", ptr), packet_alignment)
+   return bit.band(ffi.cast("uint64_t", ptr), packet_alignment - 1)
 end
-local function is_aligned (addr, alignment)
-   return get_alignment(addr, alignment) == 0
-end
-local function headroom_valid (headroom)
-   return 0 <= headroom and headroom < packet_alignment
-      and is_aligned(headroom, minimum_alignment)
+local function is_valid_headroom (headroom)
+   return headroom == bit.band(headroom, valid_headroom_mask)
 end
 
 -- Freelist containing empty packets ready for use.
@@ -124,7 +118,7 @@ function shiftleft (p, bytes)
    local ptr = ffi.cast("char*", p)
    local len = p.length
    local headroom = get_headroom(ptr)
-   if headroom_valid(bytes + headroom) then
+   if is_valid_headroom(bytes + headroom) then
       -- Fast path: just shift the packet pointer.
       p = ffi.cast(packet_ptr_t, ptr + bytes)
       p.length = len - bytes
@@ -145,7 +139,7 @@ function shiftright (p, bytes)
    local ptr = ffi.cast("char*", p)
    local len = p.length
    local headroom = get_headroom(ptr)
-   if headroom_valid(headroom - bytes) then
+   if is_valid_headroom(headroom - bytes) then
       -- Fast path: just shift the packet pointer.
       p = ffi.cast(packet_ptr_t, ptr - bytes)
       p.length = len + bytes
@@ -201,24 +195,14 @@ function preallocate_step()
 end
 
 function selftest ()
-   assert(is_aligned(0, 1))
-   assert(is_aligned(1, 1))
-   assert(is_aligned(2, 1))
-   assert(is_aligned(3, 1))
-
-   assert(    is_aligned(0, 2))
-   assert(not is_aligned(1, 2))
-   assert(    is_aligned(2, 2))
-   assert(not is_aligned(3, 2))
-
-   assert(    is_aligned(0, 512))
-   assert(not is_aligned(1, 512))
-   assert(not is_aligned(2, 512))
-   assert(not is_aligned(3, 512))
-   assert(not is_aligned(510, 512))
-   assert(not is_aligned(511, 512))
-   assert(    is_aligned(512, 512))
-   assert(not is_aligned(513, 512))
+   assert(    is_valid_headroom(0, 512))
+   assert(not is_valid_headroom(1, 512))
+   assert(not is_valid_headroom(2, 512))
+   assert(not is_valid_headroom(3, 512))
+   assert(not is_valid_headroom(510, 512))
+   assert(not is_valid_headroom(511, 512))
+   assert(    is_valid_headroom(512, 512))
+   assert(not is_valid_headroom(513, 512))
 
    local function is_power_of_2 (x) return bit.band(x, x-1) == 0 end
    assert(is_power_of_2(minimum_alignment))
@@ -243,7 +227,7 @@ function selftest ()
       check_free(p)
    end
    local function check_fast_shift(init_len, shift, amount, len, headroom)
-      assert(headroom_valid(amount))
+      assert(is_valid_headroom(amount))
       check_shift(init_len, shift, amount, len, headroom)
    end
    local function check_slow_shift(init_len, shift, amount, len)
