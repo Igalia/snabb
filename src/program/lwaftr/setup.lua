@@ -129,11 +129,7 @@ function lwaftr_app(c, conf, device)
               { address = convert_ipv4(iexternal_interface.ip) })
    config.app(c, "icmpechov6", ipv6_echo.ICMPEcho,
               { address = iinternal_interface.ip })
-   config.app(c, "remove_ipv4", insrem.Remove, {ether_type='ipv4'})
-   config.app(c, "remove_ipv6", insrem.Remove, {ether_type='ipv6'})
    config.app(c, "lwaftr", lwaftr.LwAftr, conf)
-   config.app(c, "insert_ipv4", insrem.Insert, {ether_type='ipv4'})
-   config.app(c, "insert_ipv6", insrem.Insert, {ether_type='ipv6'})
    config.app(c, "fragmenterv4", ipv4_fragment.Fragmenter,
               { mtu=gexternal_interface.mtu })
    config.app(c, "fragmenterv6", ipv6_fragment.Fragmenter,
@@ -182,17 +178,13 @@ function lwaftr_app(c, conf, device)
 
    append(preprocessing_apps_v4,   { name = "arp",        input = "south", output = "north" })
    append(preprocessing_apps_v4,   { name = "icmpechov4", input = "south", output = "north" })
-   append(preprocessing_apps_v4,   "remove_ipv4")
    prepend(postprocessing_apps_v4, { name = "icmpechov4", input = "north", output = "south" })
    prepend(postprocessing_apps_v4, { name = "arp",        input = "north", output = "south" })
-   prepend(postprocessing_apps_v4, "insert_ipv4")
 
    append(preprocessing_apps_v6,   { name = "ndp",        input = "south", output = "north" })
    append(preprocessing_apps_v6,   { name = "icmpechov6", input = "south", output = "north" })
-   append(preprocessing_apps_v6,   "remove_ipv6")
    prepend(postprocessing_apps_v6, { name = "icmpechov6", input = "north", output = "south" })
    prepend(postprocessing_apps_v6, { name = "ndp",        input = "north", output = "south" })
-   prepend(postprocessing_apps_v6, "insert_ipv6")
 
    set_preprocessors(c, preprocessing_apps_v4, "lwaftr.v4")
    set_preprocessors(c, preprocessing_apps_v6, "lwaftr.v6")
