@@ -5,7 +5,7 @@ local pci = require("lib.hardware.pci")
 local RawSocket = require("apps.socket.raw").RawSocket
 local LearningBridge = require("apps.bridge.learning").bridge
 local FloodingBridge = require("apps.bridge.flooding").bridge
-local vlan = require("apps.vlan.vlan")
+local vlan = require("apps.ethernet.vlan")
 local basic_apps = require("apps.basic.basic_apps")
 local Synth = require("apps.test.synth").Synth
 
