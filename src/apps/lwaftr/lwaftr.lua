@@ -35,6 +35,13 @@ local PKT_HAIRPINNED = 2
 
 local debug = lib.getenv("LWAFTR_DEBUG")
 
+local ethernet_header_t = ffi.typeof([[
+   struct {
+      uint8_t  dhost[6];
+      uint8_t  shost[6];
+      uint16_t type;
+   }
+]])
 local ipv4_header_t = ffi.typeof [[
    struct {
       uint8_t version_and_ihl;       // version:4, ihl:4
@@ -75,6 +82,9 @@ struct {
 } __attribute__((packed))
 ]]
 
+local ethernet_header_ptr_t = ffi.typeof("$*", ethernet_header_t)
+local ethernet_header_size = ffi.sizeof(ethernet_header_t)
+
 local ipv4_header_ptr_t = ffi.typeof("$*", ipv4_header_t)
 local ipv4_header_size = ffi.sizeof(ipv4_header_t)
 
@@ -88,6 +98,11 @@ local icmp_header_t = ffi.typeof("$*", icmp_header_t)
 local icmp_header_size = ffi.sizeof(icmp_header_t)
 
 local ipv6_pseudo_header_size = ffi.sizeof(ipv6_pseudo_header_t)
+
+-- Local bindings for constants that are used in the hot path of the
+-- data plane.  Not having them here is a 1-2% performance penalty.
+local n_ethertype_ipv4 = constants.n_ethertype_ipv4
+local n_ethertype_ipv6 = constants.n_ethertype_ipv6
 
 local o_ipv4_checksum = constants.o_ipv4_checksum
 local o_ipv4_dscp_and_ecn = constants.o_ipv4_dscp_and_ecn
@@ -197,6 +212,13 @@ local ipv6_fragment_proto = 44
 local function is_ipv6_fragment(pkt)
    local h = cast(ipv6_header_ptr_t, pkt.data)
    return h.next_header == ipv6_fragment_proto
+end
+
+local function add_ethernet_headers(pkt, ether_type)
+   pkt = packet.shiftright(pkt, ethernet_header_size)
+   ffi.fill(pkt.data, ethernet_header_size)
+   cast(ethernet_header_ptr_t, pkt.data).type = ether_type
+   return pkt
 end
 
 local function write_ipv6_header(ptr, src, dst, tc, next_header, payload_length)
@@ -503,7 +525,7 @@ function LwAftr:transmit_icmpv6_reply (pkt)
       counter.add(self.shm["out-icmpv6-packets"])
       counter.add(self.shm["out-ipv6-bytes"], pkt.length)
       counter.add(self.shm["out-ipv6-packets"])
-      return transmit(self.o6, pkt)
+      return transmit(self.output.v6, add_ethernet_headers(pkt, n_ethertype_ipv6))
    else
       counter.add(self.shm["drop-over-rate-limit-icmpv6-bytes"], pkt.length)
       counter.add(self.shm["drop-over-rate-limit-icmpv6-packets"])
@@ -560,7 +582,7 @@ function LwAftr:transmit_icmpv4_reply(pkt, orig_pkt, orig_pkt_link)
       else
          counter.add(self.shm["out-ipv4-bytes"], pkt.length)
          counter.add(self.shm["out-ipv4-packets"])
-         return transmit(self.o4, pkt)
+         return transmit(self.output.v4, add_ethernet_headers(pkt, n_ethertype_ipv4))
       end
    else
       return drop(pkt)
@@ -598,7 +620,7 @@ function LwAftr:transmit_ipv4(pkt)
    else
       counter.add(self.shm["out-ipv4-bytes"], pkt.length)
       counter.add(self.shm["out-ipv4-packets"])
-      return transmit(self.o4, pkt)
+      return transmit(self.output.v4, add_ethernet_headers(pkt, n_ethertype_ipv4))
    end
 end
 
@@ -746,7 +768,7 @@ function LwAftr:encapsulate_and_transmit(pkt, ipv6_dst, ipv6_src, pkt_src_link)
 
    counter.add(self.shm["out-ipv6-bytes"], pkt.length)
    counter.add(self.shm["out-ipv6-packets"])
-   return transmit(self.o6, pkt)
+   return transmit(self.output.v6, add_ethernet_headers(pkt, n_ethertype_ipv6))
 end
 
 function LwAftr:flush_encapsulation()
@@ -1058,8 +1080,6 @@ end
 
 function LwAftr:push ()
    local i4, i6, ih = self.input.v4, self.input.v6, self.input.hairpin_in
-   local o4, o6 = self.output.v4, self.output.v6
-   self.o4, self.o6 = o4, o6
 
    self.bad_ipv4_softwire_matches_alarm:check()
    self.bad_ipv6_softwire_matches_alarm:check()
@@ -1070,9 +1090,18 @@ function LwAftr:push ()
       -- which case enqueue them on the hairpinning incoming link.
       -- Drop anything that's not IPv6.
       local pkt = receive(i6)
-      counter.add(self.shm["in-ipv6-bytes"], pkt.length)
-      counter.add(self.shm["in-ipv6-packets"])
-      self:from_b4(pkt)
+      if cast(ethernet_header_ptr_t, pkt.data).type == n_ethertype_ipv6 then
+         pkt = packet.shiftleft(pkt, ethernet_header_size)
+         counter.add(self.shm["in-ipv6-bytes"], pkt.length)
+         counter.add(self.shm["in-ipv6-packets"])
+         self:from_b4(pkt)
+      else
+         counter.add(self.shm["drop-misplaced-not-ipv6-bytes"], pkt.length - 14)
+         counter.add(self.shm["drop-misplaced-not-ipv6-packets"])
+         counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length - 14)
+         counter.add(self.shm["drop-all-ipv6-iface-packets"])
+         drop(pkt)
+      end
    end
    self:flush_decapsulation()
 
@@ -1080,9 +1109,18 @@ function LwAftr:push ()
       -- Encapsulate incoming IPv4 packets, excluding hairpinned
       -- packets.  Drop anything that's not IPv4.
       local pkt = receive(i4)
-      counter.add(self.shm["in-ipv4-bytes"], pkt.length)
-      counter.add(self.shm["in-ipv4-packets"])
-      self:from_inet(pkt, PKT_FROM_INET)
+      if cast(ethernet_header_ptr_t, pkt.data).type == n_ethertype_ipv4 then
+         pkt = packet.shiftleft(pkt, ethernet_header_size)
+         counter.add(self.shm["in-ipv4-bytes"], pkt.length)
+         counter.add(self.shm["in-ipv4-packets"])
+         self:from_inet(pkt, PKT_FROM_INET)
+      else
+         counter.add(self.shm["drop-misplaced-not-ipv4-bytes"], pkt.length - 14)
+         counter.add(self.shm["drop-misplaced-not-ipv4-packets"])
+         counter.add(self.shm["drop-all-ipv4-iface-bytes"], pkt.length - 14)
+         counter.add(self.shm["drop-all-ipv4-iface-packets"])
+         drop(pkt)
+      end
    end
    self:flush_encapsulation()
 
