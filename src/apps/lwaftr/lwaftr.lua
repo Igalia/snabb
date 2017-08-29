@@ -4,6 +4,7 @@ local bt = require("apps.lwaftr.binding_table")
 local constants = require("apps.lwaftr.constants")
 local lwdebug = require("apps.lwaftr.lwdebug")
 local lwutil = require("apps.lwaftr.lwutil")
+local ilink = require("apps.lwaftr.ilink")
 
 local checksum = require("lib.checksum")
 local datagram = require("lib.protocol.datagram")
@@ -472,6 +473,9 @@ function LwAftr:new(conf)
    o.bad_ipv6_softwire_matches_alarm = CounterAlarm.new(bad_ipv6_softwire_matches,
       5, 1e5, o, 'drop-no-source-softwire-ipv6-packets')
 
+   o.outgoing_ipv4 = ilink.new()
+   o.outgoing_ipv6 = ilink.new()
+
    if debug then lwdebug.pp(conf) end
    return o
 end
@@ -525,7 +529,7 @@ function LwAftr:transmit_icmpv6_reply (pkt)
       counter.add(self.shm["out-icmpv6-packets"])
       counter.add(self.shm["out-ipv6-bytes"], pkt.length)
       counter.add(self.shm["out-ipv6-packets"])
-      return transmit(self.output.v6, add_ethernet_headers(pkt, n_ethertype_ipv6))
+      return self.outgoing_ipv6:push(pkt)
    else
       counter.add(self.shm["drop-over-rate-limit-icmpv6-bytes"], pkt.length)
       counter.add(self.shm["drop-over-rate-limit-icmpv6-packets"])
@@ -582,7 +586,7 @@ function LwAftr:transmit_icmpv4_reply(pkt, orig_pkt, orig_pkt_link)
       else
          counter.add(self.shm["out-ipv4-bytes"], pkt.length)
          counter.add(self.shm["out-ipv4-packets"])
-         return transmit(self.output.v4, add_ethernet_headers(pkt, n_ethertype_ipv4))
+         return self.outgoing_ipv4:push(pkt)
       end
    else
       return drop(pkt)
@@ -620,7 +624,7 @@ function LwAftr:transmit_ipv4(pkt)
    else
       counter.add(self.shm["out-ipv4-bytes"], pkt.length)
       counter.add(self.shm["out-ipv4-packets"])
-      return transmit(self.output.v4, add_ethernet_headers(pkt, n_ethertype_ipv4))
+      return self.outgoing_ipv4:push(pkt)
    end
 end
 
@@ -768,7 +772,7 @@ function LwAftr:encapsulate_and_transmit(pkt, ipv6_dst, ipv6_src, pkt_src_link)
 
    counter.add(self.shm["out-ipv6-bytes"], pkt.length)
    counter.add(self.shm["out-ipv6-packets"])
-   return transmit(self.output.v6, add_ethernet_headers(pkt, n_ethertype_ipv6))
+   return self.outgoing_ipv6:push(pkt)
 end
 
 function LwAftr:flush_encapsulation()
@@ -1132,4 +1136,13 @@ function LwAftr:push ()
       self:from_inet(pkt, PKT_HAIRPINNED)
    end
    self:flush_hairpin()
+
+   while not self.outgoing_ipv4:empty() do
+      transmit(self.output.v4,
+               add_ethernet_headers(self.outgoing_ipv4:pop(), n_ethertype_ipv4))
+   end
+   while not self.outgoing_ipv6:empty() do
+      transmit(self.output.v6,
+               add_ethernet_headers(self.outgoing_ipv6:pop(), n_ethertype_ipv6))
+   end
 end
