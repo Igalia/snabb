@@ -1129,17 +1129,17 @@ function LwAftr:push ()
    end
    self:flush_encapsulation()
 
-   for _ = 1, self.hairpin_ilink:count() do
+   for _=1,self.hairpin_ilink:count() do
       -- Encapsulate hairpinned packet.
       self:from_inet(self.hairpin_ilink:pop(), PKT_HAIRPINNED)
    end
    self:flush_hairpin()
 
-   while not self.outgoing_ipv4:empty() do
+   for _=1,self.outgoing_ipv4:count() do
       transmit(self.output.v4,
                add_ethernet_headers(self.outgoing_ipv4:pop(), n_ethertype_ipv4))
    end
-   while not self.outgoing_ipv6:empty() do
+   for _=1,self.outgoing_ipv6:count() do
       transmit(self.output.v6,
                add_ethernet_headers(self.outgoing_ipv6:pop(), n_ethertype_ipv6))
    end
