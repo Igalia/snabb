@@ -27,6 +27,8 @@ function run (args)
       hash(unpack(args))
    elseif command == 'ctable' and #args == 0 then
       ctable(unpack(args))
+   elseif command == 'ilink' and #args == 0 then
+      ilink(unpack(args))
    else
       print(usage) 
       main.exit(1)
@@ -566,4 +568,85 @@ function ctable ()
                 'streaming lookup, stride='..stride)
       stride = stride * 2
    until stride > 256
+end
+
+function ilink ()
+   local ilink = require('apps.lwaftr.ilink')
+   local link = require('core.link')
+
+   local packets = 200e6
+   local packets_per_breath = 200
+
+   local function test_ilink_push(count)
+      local test_ilink = ilink.new()
+      local p = packet.allocate()
+      local res = 0
+      for i=1,count/packets_per_breath do
+         for n=1,packets_per_breath do
+            test_ilink:push(p)
+            res = res + 1
+         end
+         test_ilink.read = test_ilink.write
+      end
+      packet.free(p)
+      return res
+   end
+
+   local function test_ilink_push_and_pop(count)
+      local test_ilink = ilink.new()
+      local p = packet.allocate()
+      local res = 0
+      for i=1,count/packets_per_breath do
+         for n=1,packets_per_breath do
+            test_ilink:push(p)
+         end
+         while not test_ilink:empty() do
+            test_ilink:pop()
+            res = res + 1
+         end
+      end
+      packet.free(p)
+      return res
+   end
+
+   local function test_link_xmit(count)
+      local test_link = link.new('test')
+      local p = packet.allocate()
+      local res = 0
+      for i=1,count/packets_per_breath do
+         for n=1,packets_per_breath do
+            link.transmit(test_link, p)
+            res = res + 1
+         end
+         test_link.read = test_link.write
+      end
+      link.free(test_link, 'test')
+      packet.free(p)
+      return res
+   end
+
+   local function test_link_xmit_and_receive(count)
+      local test_link = link.new('test')
+      local p = packet.allocate()
+      local res = 0
+      for i=1,count/packets_per_breath do
+         for n=1,packets_per_breath do
+            link.transmit(test_link, p)
+         end
+         while not link.empty(test_link) do
+            link.receive(test_link)
+            res = res + 1
+         end
+      end
+      link.free(test_link, 'test')
+      packet.free(p)
+      return res
+   end
+
+   test_perf(test_ilink_push, packets, 'ilink push')
+   --require('jit.dump').on()
+   test_perf(test_ilink_push_and_pop, packets, 'ilink push and pop')
+   -- require('jit.dump').off()
+   test_perf(test_link_xmit, packets, 'link transmit')
+   test_perf(test_link_xmit_and_receive, packets, 'link transmit and receive')
 end
