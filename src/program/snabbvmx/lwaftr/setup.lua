@@ -277,9 +277,6 @@ function lwaftr_app(c, conf, lwconf, sock_path)
       config.link(c, "lwaftr.v6 -> nh_fwd6.service")
       config.link(c, "nh_fwd4.service -> lwaftr.v4")
       config.link(c, "lwaftr.v4 -> nh_fwd4.service")
-
-      -- Add a special hairpinning queue to the lwaftr app.
-      config.link(c, "lwaftr.hairpin_out -> lwaftr.hairpin_in")
    else
       print("lwAFTR service: disabled (v6 or v4 interface config missing)")
    end
@@ -428,9 +425,6 @@ local function lwaftr_app_check (c, conf, lwconf, sources, sinks)
       config.link(c, "lwaftr.v6 -> nh_fwd6.service")
       config.link(c, "nh_fwd4.service -> lwaftr.v4")
       config.link(c, "lwaftr.v4 -> nh_fwd4.service")
-
-      -- Add a special hairpinning queue to the lwaftr app.
-      config.link(c, "lwaftr.hairpin_out -> lwaftr.hairpin_in")
 
       config.app(c, "vm_v4v6", V4V6, { description = "vm_v4v6",
                                        mirror = false })

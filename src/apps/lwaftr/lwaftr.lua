@@ -473,6 +473,7 @@ function LwAftr:new(conf)
    o.bad_ipv6_softwire_matches_alarm = CounterAlarm.new(bad_ipv6_softwire_matches,
       5, 1e5, o, 'drop-no-source-softwire-ipv6-packets')
 
+   o.hairpin_ilink = ilink.new()
    o.outgoing_ipv4 = ilink.new()
    o.outgoing_ipv6 = ilink.new()
 
@@ -582,7 +583,7 @@ function LwAftr:transmit_icmpv4_reply(pkt, orig_pkt, orig_pkt_link)
       local ipv4_header = pkt.data
       local dst_ip = get_ipv4_dst_address(ipv4_header)
       if self:ipv4_in_binding_table(dst_ip) then
-         return transmit(self.input.hairpin_in, pkt)
+         return self.hairpin_ilink:push(pkt)
       else
          counter.add(self.shm["out-ipv4-bytes"], pkt.length)
          counter.add(self.shm["out-ipv4-packets"])
@@ -620,7 +621,7 @@ function LwAftr:transmit_ipv4(pkt)
       -- came from the internet.
       counter.add(self.shm["hairpin-ipv4-bytes"], pkt.length)
       counter.add(self.shm["hairpin-ipv4-packets"])
-      return transmit(self.input.hairpin_in, pkt)
+      return self.hairpin_ilink:push(pkt)
    else
       counter.add(self.shm["out-ipv4-bytes"], pkt.length)
       counter.add(self.shm["out-ipv4-packets"])
@@ -1083,7 +1084,7 @@ function LwAftr:from_b4(pkt)
 end
 
 function LwAftr:push ()
-   local i4, i6, ih = self.input.v4, self.input.v6, self.input.hairpin_in
+   local i4, i6 = self.input.v4, self.input.v6
 
    self.bad_ipv4_softwire_matches_alarm:check()
    self.bad_ipv6_softwire_matches_alarm:check()
@@ -1128,12 +1129,9 @@ function LwAftr:push ()
    end
    self:flush_encapsulation()
 
-   for _ = 1, link.nreadable(ih) do
+   for _ = 1, self.hairpin_ilink:count() do
       -- Encapsulate hairpinned packet.
-      local pkt = receive(ih)
-      -- To reach this link, it has to have come through the lwaftr, so it
-      -- is certainly IPv4. It was already counted, no more counter updates.
-      self:from_inet(pkt, PKT_HAIRPINNED)
+      self:from_inet(self.hairpin_ilink:pop(), PKT_HAIRPINNED)
    end
    self:flush_hairpin()
 
