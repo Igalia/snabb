@@ -84,7 +84,6 @@ function BTLookupQueue.new(binding_table)
       binding_table = assert(binding_table),
    }
    ret.streamer = binding_table.softwires:make_lookup_streamer(32)
-   ret.packet_queue = ffi.new("struct packet * [32]")
    ret.length = 0
    return setmetatable(ret, {__index=BTLookupQueue})
 end

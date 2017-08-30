@@ -53,8 +53,8 @@ local ipv4_header_t = ffi.typeof [[
       uint8_t  ttl;
       uint8_t  protocol;
       uint16_t checksum;
-      uint8_t  src_ip[4];
-      uint8_t  dst_ip[4];
+      uint32_t  src_ip;
+      uint32_t  dst_ip;
    } __attribute__((packed))
 ]]
 local ipv6_header_t = ffi.typeof([[
@@ -88,9 +88,6 @@ local ethernet_header_size = ffi.sizeof(ethernet_header_t)
 
 local ipv4_header_ptr_t = ffi.typeof("$*", ipv4_header_t)
 local ipv4_header_size = ffi.sizeof(ipv4_header_t)
-
-local ipv6_header_ptr_t = ffi.typeof("$*", ipv6_header_t)
-local ipv6_header_size = ffi.sizeof(ipv6_header_t)
 
 local ipv6_header_ptr_t = ffi.typeof("$*", ipv6_header_t)
 local ipv6_header_size = ffi.sizeof(ipv6_header_t)
@@ -392,6 +389,8 @@ LwAftr.shm = {
    ["drop-out-by-policy-icmpv6-packets"]               = {counter},
    ["drop-over-mtu-but-dont-fragment-ipv4-bytes"]      = {counter},
    ["drop-over-mtu-but-dont-fragment-ipv4-packets"]    = {counter},
+   ["drop-over-rate-limit-icmpv4-bytes"]               = {counter},
+   ["drop-over-rate-limit-icmpv4-packets"]             = {counter},
    ["drop-over-rate-limit-icmpv6-bytes"]               = {counter},
    ["drop-over-rate-limit-icmpv6-packets"]             = {counter},
    ["drop-over-time-but-not-hop-limit-icmpv6-bytes"]   = {counter},
@@ -428,13 +427,21 @@ function LwAftr:new(conf)
    o.conf = conf
 
    o.binding_table = bt.load(conf.binding_table)
-   o.inet_lookup_queue = bt.BTLookupQueue.new(o.binding_table)
-   o.hairpin_lookup_queue = bt.BTLookupQueue.new(o.binding_table)
+   o.lookup_streamer = o.binding_table.softwires:make_lookup_streamer(32)
 
-   o.icmpv4_error_count = 0
-   o.icmpv4_error_rate_limit_start = 0
-   o.icmpv6_error_count = 0
-   o.icmpv6_error_rate_limit_start = 0
+   local function make_rate_limit(interface, protocol)
+      local limit = { count = 0, start = 0, protocol = protocol }
+      if interface.generate_icmp_errors then
+         limit.limit = interface.error_rate_limiting.packets
+         limit.period = interface.error_rate_limiting.period
+      else
+         limit.period, limit.limit = 60, 0
+      end
+      return limit
+   end
+
+   o.icmpv4_limits = make_rate_limit(conf.external_interface, 'icmpv4')
+   o.icmpv6_limits = make_rate_limit(conf.internal_interface, 'icmpv6')
 
    alarms.add_to_inventory {
      [{alarm_type_id='bad-ipv4-softwires-matches'}] = {
@@ -473,9 +480,18 @@ function LwAftr:new(conf)
    o.bad_ipv6_softwire_matches_alarm = CounterAlarm.new(bad_ipv6_softwire_matches,
       5, 1e5, o, 'drop-no-source-softwire-ipv6-packets')
 
-   o.hairpin_ilink = ilink.new()
-   o.outgoing_ipv4 = ilink.new()
-   o.outgoing_ipv6 = ilink.new()
+   o.scratch_softwire = o.binding_table.softwires.entry_type()
+   o.softwire_entry_ptr_t = ffi.typeof('$*', o.binding_table.softwires.entry_type)
+   o.softwire_entry_size = ffi.sizeof(o.binding_table.softwires.entry_type)
+
+   o.q = {}
+   for _,k in ipairs({'ipv4_in', 'ipv6_in', 'icmpv6_in', 'hairpin',
+                      'decap', 'decap_not_found',
+                      'encap', 'encap_not_found', 'encap_ttl', 'encap_mtu',
+                      'icmpv6_out', 'icmpv4_out', 'ipv4_pre_out',
+                      'ipv4_out', 'ipv6_out'}) do
+      o.q[k] = ilink.new()
+   end
 
    if debug then lwdebug.pp(conf) end
    return o
@@ -515,29 +531,6 @@ function LwAftr:ipv4_in_binding_table (ip)
    return self.binding_table:is_managed_ipv4_address(ip)
 end
 
-function LwAftr:transmit_icmpv6_reply (pkt)
-   local now = tonumber(engine.now())
-   -- Reset if elapsed time reached.
-   local rate_limiting = self.conf.internal_interface.error_rate_limiting
-   if now - self.icmpv6_error_rate_limit_start >= rate_limiting.period then
-      self.icmpv6_error_rate_limit_start = now
-      self.icmpv6_error_count = 0
-   end
-   -- Send packet if limit not reached.
-   if self.icmpv6_error_count < rate_limiting.packets then
-      self.icmpv6_error_count = self.icmpv6_error_count + 1
-      counter.add(self.shm["out-icmpv6-bytes"], pkt.length)
-      counter.add(self.shm["out-icmpv6-packets"])
-      counter.add(self.shm["out-ipv6-bytes"], pkt.length)
-      counter.add(self.shm["out-ipv6-packets"])
-      return self.outgoing_ipv6:push(pkt)
-   else
-      counter.add(self.shm["drop-over-rate-limit-icmpv6-bytes"], pkt.length)
-      counter.add(self.shm["drop-over-rate-limit-icmpv6-packets"])
-      return drop(pkt)
-   end
-end
-
 function LwAftr:drop_ipv4(pkt, pkt_src_link)
    if pkt_src_link == PKT_FROM_INET then
       counter.add(self.shm["drop-all-ipv4-iface-bytes"], pkt.length)
@@ -551,135 +544,6 @@ function LwAftr:drop_ipv4(pkt, pkt_src_link)
       assert(false, "Programming error, bad pkt_src_link: " .. pkt_src_link)
    end
    return drop(pkt)
-end
-
-function LwAftr:transmit_icmpv4_reply(pkt)
-   local now = tonumber(engine.now())
-   -- Reset if elapsed time reached.
-   local rate_limiting = self.conf.external_interface.error_rate_limiting
-   if now - self.icmpv4_error_rate_limit_start >= rate_limiting.period then
-      self.icmpv4_error_rate_limit_start = now
-      self.icmpv4_error_count = 0
-   end
-   -- Send packet if limit not reached.
-   if self.icmpv4_error_count < rate_limiting.packets then
-      self.icmpv4_error_count = self.icmpv4_error_count + 1
-      counter.add(self.shm["out-icmpv4-bytes"], pkt.length)
-      counter.add(self.shm["out-icmpv4-packets"])
-      -- Only locally generated error packets are handled here.  We transmit
-      -- them right away, instead of calling transmit_ipv4, because they are
-      -- never hairpinned and should not be counted by the "out-ipv4" counter.
-      -- However, they should be tunneled if the error is to be sent to a host
-      -- behind a B4, whether or not hairpinning is enabled; this is not hairpinning.
-      -- ... and the tunneling should happen via the 'hairpinning' queue, to make
-      -- sure counters are handled appropriately, despite this not being hairpinning.
-      -- This avoids having phantom incoming IPv4 packets.
-      local ipv4_header = pkt.data
-      local dst_ip = get_ipv4_dst_address(ipv4_header)
-      if self:ipv4_in_binding_table(dst_ip) then
-         return self.hairpin_ilink:push(pkt)
-      else
-         counter.add(self.shm["out-ipv4-bytes"], pkt.length)
-         counter.add(self.shm["out-ipv4-packets"])
-         return self.outgoing_ipv4:push(pkt)
-      end
-   else
-      return drop(pkt)
-   end
-end
-
--- Hairpinned packets need to be handled quite carefully. We've decided they:
--- * should increment hairpin-ipv4-bytes and hairpin-ipv4-packets
--- * should increment [in|out]-ipv6-[bytes|packets]
--- * should NOT increment  [in|out]-ipv4-[bytes|packets]
--- The latter is because decapsulating and re-encapsulating them via IPv4
--- packets is an internal implementation detail that DOES NOT go out over
--- physical wires.
--- Not incrementing out-ipv4-bytes and out-ipv4-packets is straightforward.
--- Not incrementing in-ipv4-[bytes|packets] is harder. The easy way would be
--- to add extra flags and conditionals, but it's expected that a high enough
--- percentage of traffic might be hairpinned that this could be problematic,
--- (and a nightmare as soon as we add any kind of parallelism)
--- so instead we speculatively decrement the counters here.
--- It is assumed that any packet we transmit to self.input.v4 will not
--- be dropped before the in-ipv4-[bytes|packets] counters are incremented;
--- I *think* this approach bypasses using the physical NIC but am not
--- absolutely certain.
-function LwAftr:transmit_ipv4(pkt)
-   local ipv4_header = pkt.data
-   local dst_ip = get_ipv4_dst_address(ipv4_header)
-   if (self.conf.internal_interface.hairpinning and
-       self:ipv4_in_binding_table(dst_ip)) then
-      -- The destination address is managed by the lwAFTR, so we need to
-      -- hairpin this packet.  Enqueue on the IPv4 interface, as if it
-      -- came from the internet.
-      counter.add(self.shm["hairpin-ipv4-bytes"], pkt.length)
-      counter.add(self.shm["hairpin-ipv4-packets"])
-      return self.hairpin_ilink:push(pkt)
-   else
-      counter.add(self.shm["out-ipv4-bytes"], pkt.length)
-      counter.add(self.shm["out-ipv4-packets"])
-      return self.outgoing_ipv4:push(pkt)
-   end
-end
-
--- ICMPv4 type 3 code 1, as per RFC 7596.
--- The target IPv4 address + port is not in the table.
-function LwAftr:drop_ipv4_packet_to_unreachable_host(pkt, pkt_src_link)
-   counter.add(self.shm["drop-no-dest-softwire-ipv4-bytes"], pkt.length)
-   counter.add(self.shm["drop-no-dest-softwire-ipv4-packets"])
-
-   if not self.conf.external_interface.generate_icmp_errors then
-      -- ICMP error messages off by policy; silently drop.
-      -- Not counting bytes because we do not even generate the packets.
-      counter.add(self.shm["drop-out-by-policy-icmpv4-packets"])
-      return self:drop_ipv4(pkt, pkt_src_link)
-   end
-
-   if get_ipv4_proto(pkt.data) == proto_icmp then
-      -- RFC 7596 section 8.1 requires us to silently drop incoming
-      -- ICMPv4 messages that don't match the binding table.
-      counter.add(self.shm["drop-in-by-rfc7596-icmpv4-bytes"], pkt.length)
-      counter.add(self.shm["drop-in-by-rfc7596-icmpv4-packets"])
-      return self:drop_ipv4(pkt, pkt_src_link)
-   end
-
-   local ipv4_header = pkt.data
-   local to_ip = get_ipv4_src_address_ptr(ipv4_header)
-   local icmp_config = {
-      type = constants.icmpv4_dst_unreachable,
-      code = constants.icmpv4_host_unreachable,
-   }
-   local icmp_dis = new_icmpv4_packet(
-      convert_ipv4(self.conf.external_interface.ip),
-      to_ip, pkt, icmp_config)
-
-   self:drop_ipv4(pkt, pkt_src_link)
-   return self:transmit_icmpv4_reply(icmp_dis)
-end
-
--- ICMPv6 type 1 code 5, as per RFC 7596.
--- The source (ipv6, ipv4, port) tuple is not in the table.
-function LwAftr:drop_ipv6_packet_from_bad_softwire(pkt, br_addr)
-   if not self.conf.internal_interface.generate_icmp_errors then
-      -- ICMP error messages off by policy; silently drop.
-      -- Not counting bytes because we do not even generate the packets.
-      counter.add(self.shm["drop-out-by-policy-icmpv6-packets"])
-      return drop(pkt)
-   end
-
-   local ipv6_header = pkt.data
-   local orig_src_addr_icmp_dst = get_ipv6_src_address(ipv6_header)
-   -- If br_addr is specified, use that as the source addr. Otherwise, send it
-   -- back from the IPv6 address it was sent to.
-   local icmpv6_src_addr = br_addr or get_ipv6_dst_address(ipv6_header)
-   local icmp_config = {type = constants.icmpv6_dst_unreachable,
-                        code = constants.icmpv6_failed_ingress_egress_policy,
-                       }
-   local b4fail_icmp = new_icmpv6_packet(
-      icmpv6_src_addr, orig_src_addr_icmp_dst, pkt, icmp_config)
-   drop(pkt)
-   self:transmit_icmpv6_reply(b4fail_icmp)
 end
 
 function LwAftr:encapsulating_packet_with_df_flag_would_exceed_mtu(pkt)
@@ -713,120 +577,17 @@ function LwAftr:cannot_fragment_df_packet_error(pkt)
       dst_ip, pkt, icmp_config)
 end
 
-function LwAftr:encapsulate_and_transmit(pkt, ipv6_dst, ipv6_src, pkt_src_link)
-   -- Do not encapsulate packets that now have a ttl of zero or wrapped around
-   local ttl = decrement_ttl(pkt)
-   if ttl == 0 then
-      counter.add(self.shm["drop-ttl-zero-ipv4-bytes"], pkt.length)
-      counter.add(self.shm["drop-ttl-zero-ipv4-packets"])
-      if not self.conf.external_interface.generate_icmp_errors then
-         -- Not counting bytes because we do not even generate the packets.
-         counter.add(self.shm["drop-out-by-policy-icmpv4-packets"])
-         return self:drop_ipv4(pkt, pkt_src_link)
-      end
-      local ipv4_header = pkt.data
-      local dst_ip = get_ipv4_src_address_ptr(ipv4_header)
-      local icmp_config = {type = constants.icmpv4_time_exceeded,
-                           code = constants.icmpv4_ttl_exceeded_in_transit,
-                           }
-      local reply = new_icmpv4_packet(
-         convert_ipv4(self.conf.external_interface.ip),
-         dst_ip, pkt, icmp_config)
-
-      self:drop_ipv4(pkt, pkt_src_link)
-      return self:transmit_icmpv4_reply(reply)
-   end
-
-   if debug then print("ipv6", ipv6_src, ipv6_dst) end
-
-   if self:encapsulating_packet_with_df_flag_would_exceed_mtu(pkt) then
-      counter.add(self.shm["drop-over-mtu-but-dont-fragment-ipv4-bytes"], pkt.length)
-      counter.add(self.shm["drop-over-mtu-but-dont-fragment-ipv4-packets"])
-      if not self.conf.external_interface.generate_icmp_errors then
-         -- Not counting bytes because we do not even generate the packets.
-         counter.add(self.shm["drop-out-by-policy-icmpv4-packets"])
-         return self:drop_ipv4(pkt, pkt_src_link)
-      end
-      local reply = self:cannot_fragment_df_packet_error(pkt)
-      self:drop_ipv4(pkt, pkt_src_link)
-      return self:transmit_icmpv4_reply(reply)
-   end
-
-   local payload_length = pkt.length
-   local l3_header = pkt.data
-   local traffic_class = get_ipv4_dscp_and_ecn(l3_header)
-   -- Note that this may invalidate any pointer into pkt.data.  Be warned!
-   pkt = packet.shiftright(pkt, ipv6_header_size)
-   -- Fetch possibly-moved L3 header location.
-   l3_header = pkt.data
-
-   write_ipv6_header(l3_header, ipv6_src, ipv6_dst, traffic_class,
-                     proto_ipv4, payload_length)
-
-   if debug then
-      print("encapsulated packet:")
-      lwdebug.print_pkt(pkt)
-   end
-
-   counter.add(self.shm["out-ipv6-bytes"], pkt.length)
-   counter.add(self.shm["out-ipv6-packets"])
-   return self.outgoing_ipv6:push(pkt)
-end
-
-function LwAftr:flush_encapsulation()
-   local lq = self.inet_lookup_queue
-   lq:process_queue()
-   for n = 0, lq.length - 1 do
-      local pkt, ipv6_dst, ipv6_src = lq:get_lookup(n)
-      if ipv6_dst then
-         self:encapsulate_and_transmit(pkt, ipv6_dst, ipv6_src, PKT_FROM_INET)
-      else
-         -- Lookup failed.
-         if debug then print("lookup failed") end
-         self:drop_ipv4_packet_to_unreachable_host(pkt, PKT_FROM_INET)
-      end
-   end
-   lq:reset_queue()
-end
-
-function LwAftr:flush_hairpin()
-   local lq = self.hairpin_lookup_queue
-   lq:process_queue()
-   for n = 0, lq.length - 1 do
-      local pkt, ipv6_dst, ipv6_src = lq:get_lookup(n)
-      if ipv6_dst then
-         self:encapsulate_and_transmit(pkt, ipv6_dst, ipv6_src, PKT_HAIRPINNED)
-      else
-         -- Lookup failed. This can happen even with hairpinned packets, if
-         -- the binding table changes between destination lookups.
-         -- Count the original IPv6 packet as dropped, not the hairpinned one.
-         if debug then print("lookup failed") end
-         self:drop_ipv4_packet_to_unreachable_host(pkt, PKT_HAIRPINNED)
-      end
-   end
-   lq:reset_queue()
-end
-
-function LwAftr:enqueue_encapsulation(pkt, ipv4, port, pkt_src_link)
-   if pkt_src_link == PKT_FROM_INET then
-      if self.inet_lookup_queue:enqueue_lookup(pkt, ipv4, port) then
-         -- Flush the queue right away if enough packets are queued up already.
-         self:flush_encapsulation()
-      end
-   else
-      assert(pkt_src_link == PKT_HAIRPINNED)
-      if self.hairpin_lookup_queue:enqueue_lookup(pkt, ipv4, port) then
-         -- Flush the queue right away if enough packets are queued up already.
-         self:flush_hairpin()
-      end
-   end
-end
-
-function LwAftr:icmpv4_incoming(pkt, pkt_src_link)
-   local ipv4_header = pkt.data
+function LwAftr:compute_port_for_icmpv4(p, pkt_src_link)
+   local ipv4_header = p.data
    local ipv4_header_size = get_ipv4_header_length(ipv4_header)
    local icmp_header = get_ipv4_payload(ipv4_header)
    local icmp_type = get_icmp_type(icmp_header)
+
+   if not self.conf.external_interface.allow_incoming_icmp then
+      counter.add(self.shm["drop-in-by-policy-icmpv4-bytes"], p.length)
+      counter.add(self.shm["drop-in-by-policy-icmpv4-packets"])
+      return nil
+   end
 
    -- RFC 7596 is silent on whether to validate echo request/reply checksums.
    -- ICMP checksums SHOULD be validated according to RFC 5508.
@@ -837,15 +598,11 @@ function LwAftr:icmpv4_incoming(pkt, pkt_src_link)
    local icmp_bytes = get_ipv4_total_length(ipv4_header) - ipv4_header_size
    if checksum.ipsum(icmp_header, icmp_bytes, 0) ~= 0 then
       -- Silently drop the packet, as per RFC 5508
-      counter.add(self.shm["drop-bad-checksum-icmpv4-bytes"], pkt.length)
+      counter.add(self.shm["drop-bad-checksum-icmpv4-bytes"], p.length)
       counter.add(self.shm["drop-bad-checksum-icmpv4-packets"])
-      return self:drop_ipv4(pkt, pkt_src_link)
+      return nil
    end
 
-   local ipv4_dst = get_ipv4_dst_address(ipv4_header)
-   local port
-
-   -- checksum was ok
    if icmp_type == constants.icmpv4_echo_request then
       -- For an incoming ping from the IPv4 internet, assume port == 0
       -- for the purposes of looking up a softwire in the binding table.
@@ -859,54 +616,20 @@ function LwAftr:icmpv4_incoming(pkt, pkt_src_link)
       -- of the source.  It can't identify a destination softwire.  This
       -- makes sense because you can't really "ping" a port-restricted
       -- IPv4 address.
-      port = 0
+      return 0
    elseif icmp_type == constants.icmpv4_echo_reply then
       -- A reply to a ping that originally issued from a subscriber on
       -- the B4 side; the B4 set the port in the echo identifier, as per
       -- RFC 7596, section 8.1, so use that to look up the destination
       -- softwire.
-      port = get_icmpv4_echo_identifier(icmp_header)
+      return get_icmpv4_echo_identifier(icmp_header)
    else
-      -- As per REQ-3, use the ip address embedded in the ICMP payload,
+      -- As per REQ-3, use the IP address embedded in the ICMP payload,
       -- assuming that the payload is shaped like TCP or UDP with the
       -- ports first.
       local embedded_ipv4_header = get_icmp_payload(icmp_header)
-      port = get_ipv4_payload_src_port(embedded_ipv4_header)
+      return get_ipv4_payload_src_port(embedded_ipv4_header)
    end
-
-   return self:enqueue_encapsulation(pkt, ipv4_dst, port, pkt_src_link)
-end
-
--- FIXME: Verify that the total_length declared in the packet is correct.
-function LwAftr:from_inet(pkt, pkt_src_link)
-   -- Check incoming ICMP -first-, because it has different binding table lookup logic
-   -- than other protocols.
-   local ipv4_header = pkt.data
-   if get_ipv4_proto(ipv4_header) == proto_icmp then
-      if not self.conf.external_interface.allow_incoming_icmp then
-         counter.add(self.shm["drop-in-by-policy-icmpv4-bytes"], pkt.length)
-         counter.add(self.shm["drop-in-by-policy-icmpv4-packets"])
-         return self:drop_ipv4(pkt, pkt_src_link)
-      else
-         return self:icmpv4_incoming(pkt, pkt_src_link)
-      end
-   end
-
-   -- If fragmentation support is enabled, the lwAFTR never receives fragments.
-   -- If it does, fragment support is disabled and it should drop them.
-   if is_ipv4_fragment(pkt) then
-      counter.add(self.shm["drop-ipv4-frag-disabled"])
-      return self:drop_ipv4(pkt, pkt_src_link)
-   end
-   -- It's not incoming ICMP.  Assume we can find ports in the IPv4
-   -- payload, as in TCP and UDP.  We could check strictly for TCP/UDP,
-   -- but that would filter out similarly-shaped protocols like SCTP, so
-   -- we optimistically assume that the incoming traffic has the right
-   -- shape.
-   local dst_ip = get_ipv4_dst_address(ipv4_header)
-   local dst_port = get_ipv4_payload_dst_port(ipv4_header)
-
-   return self:enqueue_encapsulation(pkt, dst_ip, dst_port, pkt_src_link)
 end
 
 function LwAftr:tunnel_unreachable(pkt, code, next_hop_mtu)
@@ -927,217 +650,473 @@ function LwAftr:tunnel_unreachable(pkt, code, next_hop_mtu)
    return icmp_reply
 end
 
--- FIXME: Verify that the softwire is in the the binding table.
-function LwAftr:icmpv6_incoming(pkt)
-   local ipv6_header = pkt.data
-   local icmp_header = get_ipv6_payload(ipv6_header)
-   local icmp_type = get_icmp_type(icmp_header)
-   local icmp_code = get_icmp_code(icmp_header)
-   if icmp_type == constants.icmpv6_packet_too_big then
-      if icmp_code ~= constants.icmpv6_code_packet_too_big then
-         -- Invalid code.
-         counter.add(self.shm["drop-too-big-type-but-not-code-icmpv6-bytes"],
-            pkt.length)
-         counter.add(self.shm["drop-too-big-type-but-not-code-icmpv6-packets"])
-         counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length)
-         counter.add(self.shm["drop-all-ipv6-iface-packets"])
-         return drop(pkt)
-      end
-      local mtu = get_icmp_mtu(icmp_header) - constants.ipv6_fixed_header_size
-      local reply = self:tunnel_unreachable(pkt,
-                                            constants.icmpv4_datagram_too_big_df,
-                                            mtu)
-      drop(pkt)
-      return self:transmit_icmpv4_reply(reply)
-   -- Take advantage of having already checked for 'packet too big' (2), and
-   -- unreachable node/hop limit exceeded/paramater problem being 1, 3, 4 respectively
-   elseif icmp_type <= constants.icmpv6_parameter_problem then
-      -- If the time limit was exceeded, require it was a hop limit code
-      if icmp_type == constants.icmpv6_time_limit_exceeded then
-         if icmp_code ~= constants.icmpv6_hop_limit_exceeded then
-            counter.add(self.shm[
-               "drop-over-time-but-not-hop-limit-icmpv6-bytes"], pkt.length)
-            counter.add(
-               self.shm["drop-over-time-but-not-hop-limit-icmpv6-packets"])
-            counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length)
-            counter.add(self.shm["drop-all-ipv6-iface-packets"])
-            return drop(pkt)
-         end
-      end
-      -- Accept all unreachable or parameter problem codes
-      local reply = self:tunnel_unreachable(pkt,
-                                            constants.icmpv4_host_unreachable)
-      drop(pkt)
-      return self:transmit_icmpv4_reply(reply)
-   else
-      -- No other types of ICMPv6, including echo request/reply, are
-      -- handled.
-      counter.add(self.shm["drop-unknown-protocol-icmpv6-bytes"], pkt.length)
-      counter.add(self.shm["drop-unknown-protocol-icmpv6-packets"])
-      counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length)
-      counter.add(self.shm["drop-all-ipv6-iface-packets"])
-      return drop(pkt)
-   end
-end
-
-function LwAftr:flush_decapsulation()
-   local lq = self.inet_lookup_queue
-   lq:process_queue()
-   for n = 0, lq.length - 1 do
-      local pkt, b4_addr, br_addr = lq:get_lookup(n)
-
-      local ipv6_header = pkt.data
-      if (b4_addr
-          and ipv6_equals(get_ipv6_src_address(ipv6_header), b4_addr)
-          and ipv6_equals(get_ipv6_dst_address(ipv6_header), br_addr)) then
-         -- Source softwire is valid; decapsulate and forward.
-         -- Note that this may invalidate any pointer into pkt.data.  Be warned!
-         pkt = packet.shiftleft(pkt, ipv6_fixed_header_size)
-         self:transmit_ipv4(pkt)
+function LwAftr:receive_ipv6(src, dst)
+   -- Strip ethernet headers from incoming IPv6 packets.
+   for _=1,link.nreadable(src) do
+      local p = receive(src)
+      if cast(ethernet_header_ptr_t, p.data).type == n_ethertype_ipv6 then
+         p = packet.shiftleft(p, ethernet_header_size)
+         counter.add(self.shm["in-ipv6-bytes"], p.length)
+         counter.add(self.shm["in-ipv6-packets"])
+         dst:push(p)
       else
-         counter.add(self.shm["drop-no-source-softwire-ipv6-bytes"], pkt.length)
-         counter.add(self.shm["drop-no-source-softwire-ipv6-packets"])
-         counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length)
+         -- Drop anything that's not IPv6.
+         counter.add(self.shm["drop-misplaced-not-ipv6-bytes"], p.length - 14)
+         counter.add(self.shm["drop-misplaced-not-ipv6-packets"])
+         counter.add(self.shm["drop-all-ipv6-iface-bytes"], p.length - 14)
          counter.add(self.shm["drop-all-ipv6-iface-packets"])
-         self:drop_ipv6_packet_from_bad_softwire(pkt, br_addr)
+         drop(p)
       end
    end
-   lq:reset_queue()
 end
 
-function LwAftr:enqueue_decapsulation(pkt, ipv4, port)
-   if self.inet_lookup_queue:enqueue_lookup(pkt, ipv4, port) then
-      -- Flush the queue right away if enough packets are queued up already.
-      self:flush_decapsulation()
+function LwAftr:receive_ipv4(src, dst)
+   -- Strip ethernet headers from incoming IPv4 packets.
+   for _=1,link.nreadable(src) do
+      local p = receive(src)
+      if cast(ethernet_header_ptr_t, p.data).type == n_ethertype_ipv4 then
+         p = packet.shiftleft(p, ethernet_header_size)
+         counter.add(self.shm["in-ipv4-bytes"], p.length)
+         counter.add(self.shm["in-ipv4-packets"])
+         dst:push(p)
+      else
+         -- Drop anything that's not IPv4.
+         counter.add(self.shm["drop-misplaced-not-ipv4-bytes"], p.length - 14)
+         counter.add(self.shm["drop-misplaced-not-ipv4-packets"])
+         counter.add(self.shm["drop-all-ipv4-iface-bytes"], p.length - 14)
+         counter.add(self.shm["drop-all-ipv4-iface-packets"])
+         drop(p)
+      end
    end
 end
 
 -- FIXME: Verify that the packet length is big enough?
-function LwAftr:from_b4(pkt)
-   local ipv6_header = pkt.data
-   local proto = get_ipv6_next_header(ipv6_header)
+function LwAftr:prepare_decapsulation(src, icmpv6, dst)
+   for _=1,#src do
+      local p = src:pop()
+      local ipv6_header = p.data
+      local proto = get_ipv6_next_header(ipv6_header)
 
-   if proto ~= proto_ipv4 then
-      if proto == proto_icmpv6 then
-         if not self.conf.internal_interface.allow_incoming_icmp then
-            counter.add(self.shm["drop-in-by-policy-icmpv6-bytes"], pkt.length)
-            counter.add(self.shm["drop-in-by-policy-icmpv6-packets"])
-            counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length)
+      if proto ~= proto_ipv4 then
+         if proto == proto_icmpv6 then
+            icmpv6:push(p)
+         else
+            -- Drop packet with unknown protocol.
+            if proto == ipv6_fragment_proto then
+               counter.add(self.shm["drop-ipv4-frag-disabled"])
+            else
+               counter.add(self.shm["drop-unknown-protocol-ipv6-bytes"], p.length)
+               counter.add(self.shm["drop-unknown-protocol-ipv6-packets"])
+            end
+            counter.add(self.shm["drop-all-ipv6-iface-bytes"], p.length)
             counter.add(self.shm["drop-all-ipv6-iface-packets"])
-            return drop(pkt)
-         else
-            return self:icmpv6_incoming(pkt)
+            drop(p)
          end
       else
-         -- Drop packet with unknown protocol.  Note that this case also
-         -- handles fragments, if the lwaftr was not preceded by a
-         -- reassembler.
-         if proto == ipv6_fragment_proto then
-            counter.add(self.shm["drop-ipv4-frag-disabled"])
+         p = packet.shiftright(p, self.softwire_entry_size)
+         local entry = ffi.cast(self.softwire_entry_ptr_t, p.data)
+         local tunneled_ipv4_header = p.data + self.softwire_entry_size +
+            ipv6_header_size
+         entry.key.ipv4 = get_ipv4_src_address(tunneled_ipv4_header)
+         if get_ipv4_proto(tunneled_ipv4_header) == proto_icmp then
+            local icmp_header = get_ipv4_payload(tunneled_ipv4_header)
+            local icmp_type = get_icmp_type(icmp_header)
+            if icmp_type == constants.icmpv4_echo_request then
+               -- A ping going out from the B4 to the internet; the B4 will
+               -- encode a port in its range into the echo identifier, as per
+               -- RFC 7596 section 8.
+               entry.key.psid = get_icmpv4_echo_identifier(icmp_header)
+            elseif icmp_type == constants.icmpv4_echo_reply then
+               -- A reply to a ping, coming from the B4.  Only B4s whose
+               -- softwire is associated with port 0 are pingable.  See
+               -- icmpv4_incoming for more discussion.
+               entry.key.psid = 0
+            else
+               -- Otherwise it's an error in response to a non-ICMP packet,
+               -- routed to the B4 via the ports in IPv4 payload.  Extract
+               -- these ports from the embedded packet fragment in the ICMP
+               -- payload.
+               local embedded_ipv4_header = get_icmp_payload(icmp_header)
+               entry.key.psid = get_ipv4_payload_src_port(embedded_ipv4_header)
+            end
          else
-            counter.add(self.shm["drop-unknown-protocol-ipv6-bytes"], pkt.length)
-            counter.add(self.shm["drop-unknown-protocol-ipv6-packets"])
+            -- It's not ICMP.  Assume we can find ports in the IPv4 payload,
+            -- as in TCP and UDP.  We could check strictly for TCP/UDP, but
+            -- that would filter out similarly-shaped protocols like SCTP, so
+            -- we optimistically assume that the incoming traffic has the
+            -- right shape.
+            entry.key.psid = get_ipv4_payload_src_port(tunneled_ipv4_header)
          end
-         counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length)
-         counter.add(self.shm["drop-all-ipv6-iface-packets"])
-         return drop(pkt)
+         dst:push(p)
       end
    end
+end
 
-   local tunneled_ipv4_header = get_ipv6_payload(ipv6_header)
-   local port
-   if get_ipv4_proto(tunneled_ipv4_header) == proto_icmp then
-      local icmp_header = get_ipv4_payload(tunneled_ipv4_header)
+function LwAftr:process_icmpv6(src, dst)
+   for _=1,#src do
+      local p = src:pop()
+      local ipv6_header = p.data
+      local icmp_header = get_ipv6_payload(ipv6_header)
       local icmp_type = get_icmp_type(icmp_header)
-      if icmp_type == constants.icmpv4_echo_request then
-         -- A ping going out from the B4 to the internet; the B4 will
-         -- encode a port in its range into the echo identifier, as per
-         -- RFC 7596 section 8.
-         port = get_icmpv4_echo_identifier(icmp_header)
-      elseif icmp_type == constants.icmpv4_echo_reply then
-         -- A reply to a ping, coming from the B4.  Only B4s whose
-         -- softwire is associated with port 0 are pingable.  See
-         -- icmpv4_incoming for more discussion.
-         port = 0
+      local icmp_code = get_icmp_code(icmp_header)
+      if not self.conf.internal_interface.allow_incoming_icmp then
+         counter.add(self.shm["drop-in-by-policy-icmpv6-bytes"], p.length)
+         counter.add(self.shm["drop-in-by-policy-icmpv6-packets"])
+         counter.add(self.shm["drop-all-ipv6-iface-bytes"], p.length)
+         counter.add(self.shm["drop-all-ipv6-iface-packets"])
+      elseif icmp_type == constants.icmpv6_packet_too_big then
+         if icmp_code ~= constants.icmpv6_code_packet_too_big then
+            -- Invalid code.
+            counter.add(self.shm["drop-too-big-type-but-not-code-icmpv6-bytes"],
+                        p.length)
+            counter.add(self.shm["drop-too-big-type-but-not-code-icmpv6-packets"])
+            counter.add(self.shm["drop-all-ipv6-iface-bytes"], p.length)
+            counter.add(self.shm["drop-all-ipv6-iface-packets"])
+         else
+            local mtu = get_icmp_mtu(icmp_header) - constants.ipv6_fixed_header_size
+            local reply = self:tunnel_unreachable(
+               p, constants.icmpv4_datagram_too_big_df, mtu)
+            dst:push(reply)
+         end
+         -- Take advantage of having already checked for 'packet too
+         -- big' (2), and unreachable node/hop limit exceeded/paramater
+         -- problem being 1, 3, 4 respectively.
+      elseif icmp_type <= constants.icmpv6_parameter_problem then
+         -- If the time limit was exceeded, require it was a hop limit code
+         if (icmp_type == constants.icmpv6_time_limit_exceeded
+             and icmp_code ~= constants.icmpv6_hop_limit_exceeded) then
+            counter.add(self.shm[
+               "drop-over-time-but-not-hop-limit-icmpv6-bytes"], p.length)
+            counter.add(
+               self.shm["drop-over-time-but-not-hop-limit-icmpv6-packets"])
+            counter.add(self.shm["drop-all-ipv6-iface-bytes"], p.length)
+            counter.add(self.shm["drop-all-ipv6-iface-packets"])
+         else
+            -- Accept all unreachable or parameter problem codes.
+            local reply = self:tunnel_unreachable(
+               p, constants.icmpv4_host_unreachable)
+            dst:push(reply)
+         end
       else
-         -- Otherwise it's an error in response to a non-ICMP packet,
-         -- routed to the B4 via the ports in IPv4 payload.  Extract
-         -- these ports from the embedded packet fragment in the ICMP
-         -- payload.
-         local embedded_ipv4_header = get_icmp_payload(icmp_header)
-         port = get_ipv4_payload_src_port(embedded_ipv4_header)
+         -- No other types of ICMPv6, including echo request/reply, are
+         -- handled.
+         counter.add(self.shm["drop-unknown-protocol-icmpv6-bytes"], p.length)
+         counter.add(self.shm["drop-unknown-protocol-icmpv6-packets"])
+         counter.add(self.shm["drop-all-ipv6-iface-bytes"], p.length)
+         counter.add(self.shm["drop-all-ipv6-iface-packets"])
       end
-   else
-      -- It's not ICMP.  Assume we can find ports in the IPv4 payload,
-      -- as in TCP and UDP.  We could check strictly for TCP/UDP, but
-      -- that would filter out similarly-shaped protocols like SCTP, so
-      -- we optimistically assume that the incoming traffic has the
-      -- right shape.
-      port = get_ipv4_payload_src_port(tunneled_ipv4_header)
+      drop(p)
    end
+end
 
-   local ipv4 = get_ipv4_src_address(tunneled_ipv4_header)
-   return self:enqueue_decapsulation(pkt, ipv4, port)
+-- FIXME: Verify that the total_length declared in the packet is correct.
+function LwAftr:prepare_encapsulation(src, dst, pkt_src_link)
+   for _=1,#src do
+      local p = src:pop()
+      local port
+      local ipv4_header = p.data
+
+      if is_ipv4_fragment(p) then
+         -- If fragmentation support is enabled, the lwAFTR never
+         -- receives fragments.  If it does, fragment support is
+         -- disabled and it should drop them.
+         counter.add(self.shm["drop-ipv4-frag-disabled"])
+         port = nil
+      elseif get_ipv4_proto(ipv4_header) == proto_icmp then
+         -- ICMP has its own port-for-PSID logic.
+         port = self:compute_port_for_icmpv4(p)
+      else
+         -- Assume we can find ports in the IPv4 payload, as in TCP and
+         -- UDP.  We could check strictly for TCP/UDP, but that would
+         -- filter out similarly-shaped protocols like SCTP, so we
+         -- optimistically assume that the incoming traffic has the
+         -- right shape.
+         port = get_ipv4_payload_dst_port(ipv4_header)
+      end
+
+      if port then
+         p = packet.shiftright(p, self.softwire_entry_size)
+         local entry = ffi.cast(self.softwire_entry_ptr_t, p.data)
+         local ipv4 = p.data + self.softwire_entry_size
+         entry.key.ipv4 = get_ipv4_dst_address(ipv4)
+         entry.key.psid = port
+         dst:push(p)
+      else
+         self:drop_ipv4(p, pkt_src_link)
+      end
+   end
+end
+
+function LwAftr:perform_lookup(q)
+   local idx, avail = 0, #q
+   local bt = self.binding_table
+   local streamer = self.lookup_streamer
+   while idx < avail do
+      -- Look up PSIDs for the incoming packets and copy keys to the
+      -- streamer.
+      for i = 0, math.min(32, avail - idx) - 1 do
+         local p = q:peek(idx + i)
+         local entry = ffi.cast(self.softwire_entry_ptr_t, p.data)
+         local ipv4, port = entry.key.ipv4, entry.key.psid
+         streamer.entries[i].key.ipv4 = ipv4
+         streamer.entries[i].key.psid = bt:lookup_psid(ipv4, port)
+      end
+      -- Run the streaming lookup and copy out the results.
+      streamer:stream()
+      for i = 0, math.min(32, avail - idx) - 1 do
+         local p = q:peek(idx + i)
+         ffi.copy(p.data, streamer.entries[i], self.softwire_entry_size)
+      end
+      idx = idx + 32
+   end
+end
+
+function LwAftr:perform_decapsulation(src, err_not_found, dst)
+   for _=1,#src do
+      local p = src:pop()
+      local entry = ffi.cast(self.softwire_entry_ptr_t, p.data)
+      local ipv6 = ffi.cast(ipv6_header_ptr_t, p.data + self.softwire_entry_size)
+
+      if (entry.hash ~= 0xffffffff
+             and ipv6_equals(ipv6.src_ip, entry.value.b4_ipv6)
+             and ipv6_equals(ipv6.dst_ip, entry.value.br_address)) then
+         -- Source softwire is valid; decapsulate and forward.
+         dst:push(
+            packet.shiftleft(p, self.softwire_entry_size + ipv6_header_size))
+      else
+         -- Softwire not found.
+         err_not_found:push(packet.shiftleft(p, self.softwire_entry_size))
+      end
+   end
+end
+
+-- ICMPv6 type 1 code 5, as per RFC 7596.
+-- The source (ipv6, ipv4, port) tuple is not in the table.
+function LwAftr:process_decapsulation_failures(src, dst)
+   for i=1,#src do
+      local p = src:pop()
+      counter.add(self.shm["drop-no-source-softwire-ipv6-bytes"], p.length)
+      counter.add(self.shm["drop-no-source-softwire-ipv6-packets"])
+      counter.add(self.shm["drop-all-ipv6-iface-bytes"], p.length)
+      counter.add(self.shm["drop-all-ipv6-iface-packets"])
+      if not self.conf.internal_interface.generate_icmp_errors then
+         -- ICMP error messages off by policy; silently drop.
+         -- Not counting bytes because we do not even generate the packets.
+         counter.add(self.shm["drop-out-by-policy-icmpv6-packets"])
+      else
+         local ipv6_header = p.data
+         local orig_src_addr_icmp_dst = get_ipv6_src_address(ipv6_header)
+         -- Send packet back from the IPv6 address it was sent to.
+         local icmpv6_src_addr = get_ipv6_dst_address(ipv6_header)
+         local icmp_config = {type = constants.icmpv6_dst_unreachable,
+                              code = constants.icmpv6_failed_ingress_egress_policy,
+                             }
+         local b4fail_icmp = new_icmpv6_packet(
+            icmpv6_src_addr, orig_src_addr_icmp_dst, p, icmp_config)
+         dst:push(b4fail_icmp)
+      end
+      drop(p)
+   end
+end
+
+-- Hairpinned packets need to be handled quite carefully. We've decided they:
+-- * should increment hairpin-ipv4-bytes and hairpin-ipv4-packets
+-- * should increment [in|out]-ipv6-[bytes|packets]
+-- * should NOT increment  [in|out]-ipv4-[bytes|packets]
+-- The latter is because decapsulating and re-encapsulating them via IPv4
+-- packets is an internal implementation detail that DOES NOT go out over
+-- physical wires.
+-- Not incrementing out-ipv4-bytes and out-ipv4-packets is straightforward.
+-- Not incrementing in-ipv4-[bytes|packets] is harder. The easy way would be
+-- to add extra flags and conditionals, but it's expected that a high enough
+-- percentage of traffic might be hairpinned that this could be problematic,
+-- (and a nightmare as soon as we add any kind of parallelism)
+-- so instead we speculatively decrement the counters here.
+-- It is assumed that any packet we transmit to self.input.v4 will not
+-- be dropped before the in-ipv4-[bytes|packets] counters are incremented;
+-- I *think* this approach bypasses using the physical NIC but am not
+-- absolutely certain.
+function LwAftr:apply_hairpinning(src, hairpin, dst, use_hairpin_counter)
+   local hairpinning = self.conf.internal_interface.hairpinning
+   for i=1,#src do
+      local p = src:pop()
+      local ipv4_header = p.data
+      local dst_ip = get_ipv4_dst_address(ipv4_header)
+      if hairpinning and self:ipv4_in_binding_table(dst_ip) then
+         if use_hairpin_counter then
+            counter.add(self.shm["hairpin-ipv4-bytes"], p.length)
+            counter.add(self.shm["hairpin-ipv4-packets"])
+         end
+         hairpin:push(p)
+      else
+         dst:push(p)
+      end
+   end
+end
+
+function LwAftr:perform_encapsulation(src, err_not_found, err_ttl, err_mtu, dst)
+   for _=1,#src do
+      local p = src:pop()
+
+      if ffi.cast(self.softwire_entry_ptr_t, p.data).hash == 0xffffffff then
+         err_not_found:push(packet.shiftleft(p, self.softwire_entry_size))
+      else
+         -- Source softwire is valid; decapsulate and forward.
+         ffi.copy(self.scratch_softwire, p.data, self.softwire_entry_size)
+         p = packet.shiftleft(p, self.softwire_entry_size)
+
+         local ttl = decrement_ttl(p)
+         if ttl == 0 then
+            err_ttl:push(p)
+         elseif self:encapsulating_packet_with_df_flag_would_exceed_mtu(p) then
+            err_mtu:push(p)
+         else
+            local payload_length = p.length
+            local l3_header = p.data
+            local traffic_class = get_ipv4_dscp_and_ecn(l3_header)
+            p = packet.shiftright(p, ipv6_header_size)
+            write_ipv6_header(p.data, self.scratch_softwire.value.br_address,
+                              self.scratch_softwire.value.b4_ipv6, traffic_class,
+                              proto_ipv4, payload_length)
+            dst:push(p)
+         end
+      end
+   end
+end         
+            
+function LwAftr:process_encapsulation_failures(err_not_found, err_ttl, err_mtu,
+                                               dst, pkt_src_link)
+   for _=1,#err_not_found do
+      local p = err_not_found:pop()
+      counter.add(self.shm["drop-no-dest-softwire-ipv4-bytes"], p.length)
+      counter.add(self.shm["drop-no-dest-softwire-ipv4-packets"])
+
+      if get_ipv4_proto(p.data) == proto_icmp then
+         -- RFC 7596 section 8.1 requires us to silently drop incoming
+         -- ICMPv4 messages that don't match the binding table.
+         counter.add(self.shm["drop-in-by-rfc7596-icmpv4-bytes"], p.length)
+         counter.add(self.shm["drop-in-by-rfc7596-icmpv4-packets"])
+      else
+         local ipv4_header = p.data
+         local to_ip = get_ipv4_src_address_ptr(ipv4_header)
+         local icmp_config = {
+            type = constants.icmpv4_dst_unreachable,
+            code = constants.icmpv4_host_unreachable,
+         }
+         dst:push(new_icmpv4_packet(
+                     convert_ipv4(self.conf.external_interface.ip),
+                     to_ip, p, icmp_config))
+      end
+      self:drop_ipv4(p, pkt_src_link)
+   end
+   for _=1,#err_ttl do
+      local p = err_ttl:pop()
+      counter.add(self.shm["drop-ttl-zero-ipv4-bytes"], p.length)
+      counter.add(self.shm["drop-ttl-zero-ipv4-packets"])
+
+      local ipv4_header = p.data
+      local dst_ip = get_ipv4_src_address_ptr(ipv4_header)
+      local icmp_config = {
+         type = constants.icmpv4_time_exceeded,
+         code = constants.icmpv4_ttl_exceeded_in_transit,
+      }
+      dst:push(new_icmpv4_packet(
+                  convert_ipv4(self.conf.external_interface.ip),
+                  dst_ip, p, icmp_config))
+      self:drop_ipv4(p, pkt_src_link)
+   end
+   for _=1,#err_mtu do
+      local p = err_mtu:pop()
+      counter.add(self.shm["drop-over-mtu-but-dont-fragment-ipv4-bytes"], p.length)
+      counter.add(self.shm["drop-over-mtu-but-dont-fragment-ipv4-packets"])
+      dst:push(self:cannot_fragment_df_packet_error(p))
+      self:drop_ipv4(p, pkt_src_link)
+   end
+end
+
+function LwAftr:forward_with_rate_limiting(src, dst, limit)
+   local now = engine.now()
+   if now - limit.start >= limit.period then
+      limit.start, limit.count = now, 0
+   end
+   local protocol = limit.protocol
+   for _=1,#src do
+      local p = src:pop()
+      if limit.count < limit.limit then
+         limit.count = limit.count + 1
+         counter.add(self.shm["out-"..protocol.."-bytes"], p.length)
+         counter.add(self.shm["out-"..protocol.."-packets"])
+         dst:push(p)
+      else
+         if limit.limit == 0 then
+            counter.add(self.shm["drop-out-by-policy-"..protocol.."-packets"])
+         else
+            counter.add(self.shm["drop-over-rate-limit-"..protocol.."-bytes"],
+                        p.length)
+            counter.add(self.shm["drop-over-rate-limit-"..protocol.."-packets"])
+         end
+         drop(p)
+      end
+   end
+end
+
+function LwAftr:transmit_ipv6(src, dst)
+   for _=1,#src do
+      local p = src:pop()
+      counter.add(self.shm["out-ipv6-bytes"], p.length)
+      counter.add(self.shm["out-ipv6-packets"])
+      transmit(dst, add_ethernet_headers(p, n_ethertype_ipv6))
+   end
+end
+
+function LwAftr:transmit_ipv4(src, dst)
+   for _=1,#src do
+      local p = src:pop()
+      counter.add(self.shm["out-ipv4-bytes"], p.length)
+      counter.add(self.shm["out-ipv4-packets"])
+      transmit(dst, add_ethernet_headers(p, n_ethertype_ipv4))
+   end
 end
 
 function LwAftr:push ()
-   local i4, i6 = self.input.v4, self.input.v6
-
    self.bad_ipv4_softwire_matches_alarm:check()
    self.bad_ipv6_softwire_matches_alarm:check()
 
-   for _ = 1, link.nreadable(i6) do
-      -- Decapsulate incoming IPv6 packets from the B4 interface and
-      -- push them out the V4 link, unless they need hairpinning, in
-      -- which case enqueue them on the hairpinning incoming link.
-      -- Drop anything that's not IPv6.
-      local pkt = receive(i6)
-      if cast(ethernet_header_ptr_t, pkt.data).type == n_ethertype_ipv6 then
-         pkt = packet.shiftleft(pkt, ethernet_header_size)
-         counter.add(self.shm["in-ipv6-bytes"], pkt.length)
-         counter.add(self.shm["in-ipv6-packets"])
-         self:from_b4(pkt)
-      else
-         counter.add(self.shm["drop-misplaced-not-ipv6-bytes"], pkt.length - 14)
-         counter.add(self.shm["drop-misplaced-not-ipv6-packets"])
-         counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length - 14)
-         counter.add(self.shm["drop-all-ipv6-iface-packets"])
-         drop(pkt)
-      end
-   end
-   self:flush_decapsulation()
+   local q = self.q
 
-   for _ = 1, link.nreadable(i4) do
-      -- Encapsulate incoming IPv4 packets, excluding hairpinned
-      -- packets.  Drop anything that's not IPv4.
-      local pkt = receive(i4)
-      if cast(ethernet_header_ptr_t, pkt.data).type == n_ethertype_ipv4 then
-         pkt = packet.shiftleft(pkt, ethernet_header_size)
-         counter.add(self.shm["in-ipv4-bytes"], pkt.length)
-         counter.add(self.shm["in-ipv4-packets"])
-         self:from_inet(pkt, PKT_FROM_INET)
-      else
-         counter.add(self.shm["drop-misplaced-not-ipv4-bytes"], pkt.length - 14)
-         counter.add(self.shm["drop-misplaced-not-ipv4-packets"])
-         counter.add(self.shm["drop-all-ipv4-iface-bytes"], pkt.length - 14)
-         counter.add(self.shm["drop-all-ipv4-iface-packets"])
-         drop(pkt)
-      end
-   end
-   self:flush_encapsulation()
+   self:receive_ipv6(self.input.v6, q.ipv6_in)
+   self:prepare_decapsulation(q.ipv6_in, q.icmpv6_in, q.decap)
+   self:process_icmpv6(q.icmpv6_in, q.icmpv4_out)
+   self:perform_lookup(q.decap)
+   self:perform_decapsulation(q.decap, q.decap_not_found, q.ipv4_pre_out)
+   self:process_decapsulation_failures(q.decap_not_found, q.icmpv6_out)
 
-   for _=1,self.hairpin_ilink:count() do
-      -- Encapsulate hairpinned packet.
-      self:from_inet(self.hairpin_ilink:pop(), PKT_HAIRPINNED)
-   end
-   self:flush_hairpin()
+   self:apply_hairpinning(q.ipv4_pre_out, q.hairpin, q.ipv4_out, true)
 
-   for _=1,self.outgoing_ipv4:count() do
-      transmit(self.output.v4,
-               add_ethernet_headers(self.outgoing_ipv4:pop(), n_ethertype_ipv4))
-   end
-   for _=1,self.outgoing_ipv6:count() do
-      transmit(self.output.v6,
-               add_ethernet_headers(self.outgoing_ipv6:pop(), n_ethertype_ipv6))
-   end
+   self:receive_ipv4(self.input.v4, q.ipv4_in)
+   self:prepare_encapsulation(q.ipv4_in, q.encap, PKT_FROM_INET)
+   self:perform_lookup(q.encap)
+   self:perform_encapsulation(q.encap, q.encap_not_found, q.encap_ttl,
+                              q.encap_mtu, q.ipv6_out)
+   self:process_encapsulation_failures(q.encap_not_found, q.encap_ttl,
+                                       q.encap_mtu, q.icmpv4_out, PKT_FROM_INET)
+
+   self:prepare_encapsulation(q.hairpin, q.encap, PKT_HAIRPINNED)
+   self:perform_lookup(q.encap)
+   self:perform_encapsulation(q.encap, q.encap_not_found, q.encap_ttl,
+                              q.encap_mtu, q.ipv6_out)
+   -- FIXME: Could hairpinning errors cause a hairpinned error loop?
+   self:process_encapsulation_failures(q.encap_not_found, q.encap_ttl,
+                                       q.encap_mtu, q.icmpv4_out, PKT_HAIRPINNED)
+
+   self:forward_with_rate_limiting(q.icmpv6_out, q.ipv6_out, self.icmpv6_limits)
+   self:forward_with_rate_limiting(q.icmpv4_out, q.ipv4_pre_out,
+                                   self.icmpv4_limits)
+
+   -- See above fixme: here the graph loops back to q.hairpin which may
+   -- not be drained.
+   self:apply_hairpinning(q.ipv4_pre_out, q.hairpin, q.ipv4_out, false)
+
+   self:transmit_ipv6(q.ipv6_out, self.output.v6)
+   self:transmit_ipv4(q.ipv4_out, self.output.v4)
 end

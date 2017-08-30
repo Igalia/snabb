@@ -45,7 +45,12 @@ function pop (ilink)
    return p
 end
 
-local mt = { __index = { count = count, push = push, pop = pop, empty = empty },
+function peek (ilink, i)
+   return ilink.packets[bit.band(ilink.read + i, packet_index_mask)]
+end
+
+local mt = { __index = { count=count, push=push, peek=peek, pop=pop,
+                         empty=empty },
              __len = count }
 ilink_t = ffi.metatype(ilink_t, mt)
 
