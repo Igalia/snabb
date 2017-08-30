@@ -553,19 +553,13 @@ function LwAftr:drop_ipv4(pkt, pkt_src_link)
    return drop(pkt)
 end
 
-function LwAftr:transmit_icmpv4_reply(pkt, orig_pkt, orig_pkt_link)
+function LwAftr:transmit_icmpv4_reply(pkt)
    local now = tonumber(engine.now())
    -- Reset if elapsed time reached.
    local rate_limiting = self.conf.external_interface.error_rate_limiting
    if now - self.icmpv4_error_rate_limit_start >= rate_limiting.period then
       self.icmpv4_error_rate_limit_start = now
       self.icmpv4_error_count = 0
-   end
-   -- Origin packet is always dropped.
-   if orig_pkt_link then
-      self:drop_ipv4(orig_pkt, orig_pkt_link)
-   else
-      drop(orig_pkt)
    end
    -- Send packet if limit not reached.
    if self.icmpv4_error_count < rate_limiting.packets then
@@ -660,7 +654,8 @@ function LwAftr:drop_ipv4_packet_to_unreachable_host(pkt, pkt_src_link)
       convert_ipv4(self.conf.external_interface.ip),
       to_ip, pkt, icmp_config)
 
-   return self:transmit_icmpv4_reply(icmp_dis, pkt, pkt_src_link)
+   self:drop_ipv4(pkt, pkt_src_link)
+   return self:transmit_icmpv4_reply(icmp_dis)
 end
 
 -- ICMPv6 type 1 code 5, as per RFC 7596.
@@ -738,7 +733,8 @@ function LwAftr:encapsulate_and_transmit(pkt, ipv6_dst, ipv6_src, pkt_src_link)
          convert_ipv4(self.conf.external_interface.ip),
          dst_ip, pkt, icmp_config)
 
-      return self:transmit_icmpv4_reply(reply, pkt, pkt_src_link)
+      self:drop_ipv4(pkt, pkt_src_link)
+      return self:transmit_icmpv4_reply(reply)
    end
 
    if debug then print("ipv6", ipv6_src, ipv6_dst) end
@@ -752,7 +748,8 @@ function LwAftr:encapsulate_and_transmit(pkt, ipv6_dst, ipv6_src, pkt_src_link)
          return self:drop_ipv4(pkt, pkt_src_link)
       end
       local reply = self:cannot_fragment_df_packet_error(pkt)
-      return self:transmit_icmpv4_reply(reply, pkt, pkt_src_link)
+      self:drop_ipv4(pkt, pkt_src_link)
+      return self:transmit_icmpv4_reply(reply)
    end
 
    local payload_length = pkt.length
@@ -950,7 +947,8 @@ function LwAftr:icmpv6_incoming(pkt)
       local reply = self:tunnel_unreachable(pkt,
                                             constants.icmpv4_datagram_too_big_df,
                                             mtu)
-      return self:transmit_icmpv4_reply(reply, pkt)
+      drop(pkt)
+      return self:transmit_icmpv4_reply(reply)
    -- Take advantage of having already checked for 'packet too big' (2), and
    -- unreachable node/hop limit exceeded/paramater problem being 1, 3, 4 respectively
    elseif icmp_type <= constants.icmpv6_parameter_problem then
@@ -969,7 +967,8 @@ function LwAftr:icmpv6_incoming(pkt)
       -- Accept all unreachable or parameter problem codes
       local reply = self:tunnel_unreachable(pkt,
                                             constants.icmpv4_host_unreachable)
-      return self:transmit_icmpv4_reply(reply, pkt)
+      drop(pkt)
+      return self:transmit_icmpv4_reply(reply)
    else
       -- No other types of ICMPv6, including echo request/reply, are
       -- handled.
