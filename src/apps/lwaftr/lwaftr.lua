@@ -1015,14 +1015,6 @@ end
 
 -- FIXME: Verify that the packet length is big enough?
 function LwAftr:from_b4(pkt)
-   -- If fragmentation support is enabled, the lwAFTR never receives fragments.
-   -- If it does, fragment support is disabled and it should drop them.
-   if is_ipv6_fragment(pkt) then
-      counter.add(self.shm["drop-ipv6-frag-disabled"])
-      counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length)
-      counter.add(self.shm["drop-all-ipv6-iface-packets"])
-      return drop(pkt)
-   end
    local ipv6_header = pkt.data
    local proto = get_ipv6_next_header(ipv6_header)
 
@@ -1038,9 +1030,15 @@ function LwAftr:from_b4(pkt)
             return self:icmpv6_incoming(pkt)
          end
       else
-         -- Drop packet with unknown protocol.
-         counter.add(self.shm["drop-unknown-protocol-ipv6-bytes"], pkt.length)
-         counter.add(self.shm["drop-unknown-protocol-ipv6-packets"])
+         -- Drop packet with unknown protocol.  Note that this case also
+         -- handles fragments, if the lwaftr was not preceded by a
+         -- reassembler.
+         if proto == ipv6_fragment_proto then
+            counter.add(self.shm["drop-ipv4-frag-disabled"])
+         else
+            counter.add(self.shm["drop-unknown-protocol-ipv6-bytes"], pkt.length)
+            counter.add(self.shm["drop-unknown-protocol-ipv6-packets"])
+         end
          counter.add(self.shm["drop-all-ipv6-iface-bytes"], pkt.length)
          counter.add(self.shm["drop-all-ipv6-iface-packets"])
          return drop(pkt)
