@@ -11,6 +11,8 @@ local packet   = require("core.packet")
 local max_packets = bit.lshift(1, 10)
 local packet_index_mask = max_packets - 1
 
+local band = bit.band
+
 local ilink_t = ffi.typeof([[
    struct {
       int read, write;
@@ -21,7 +23,7 @@ local ilink_t = ffi.typeof([[
 function new () return ilink_t() end
 
 function count (ilink)
-   return bit.band(ilink.write - ilink.read, packet_index_mask)
+   return band(ilink.write - ilink.read, packet_index_mask)
 end
 
 function empty (ilink)
@@ -34,19 +36,19 @@ function push (ilink, p)
       packet.free(ilink:pop())
    end
 
-   ilink.packets[bit.band(ilink.write, packet_index_mask)] = p
+   ilink.packets[band(ilink.write, packet_index_mask)] = p
    ilink.write = ilink.write + 1
 end
 
 function pop (ilink)
    if ilink:empty() then error('ilink underflow') end
-   local p = ilink.packets[bit.band(ilink.read, packet_index_mask)]
+   local p = ilink.packets[band(ilink.read, packet_index_mask)]
    ilink.read = ilink.read + 1
    return p
 end
 
 function peek (ilink, i)
-   return ilink.packets[bit.band(ilink.read + i, packet_index_mask)]
+   return ilink.packets[band(ilink.read + i, packet_index_mask)]
 end
 
 local mt = { __index = { count=count, push=push, peek=peek, pop=pop,
