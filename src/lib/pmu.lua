@@ -203,6 +203,39 @@ function profile (f,  events, aux, quiet)
    return res
 end
 
+timer = {}
+function timer.new(name, period)
+   setup()
+   return setmetatable(
+      { name = name, count = 0, active_ns = 0, period_ns = period*1e9,
+        set = new_counter_set(), period_start_ns = ffi.C.get_time_ns(),
+        active_start_ns = 0 },
+      { __index = timer })
+end
+function timer:start()
+   self.active_start_ns = ffi.C.get_time_ns()
+   switch_to(self.set)
+end
+function timer:stop()
+   switch_to(nil)
+   local now = ffi.C.get_time_ns()
+   self.active_ns = tonumber(now - self.active_start_ns) + self.active_ns
+   self.count = self.count + 1
+   if now - self.period_start_ns > self.period_ns then
+      self:report(tonumber(now - self.period_start_ns))
+      self.period_start_ns = now
+      self.count = 0
+      self.active_ns = 0
+   end
+end
+function timer:report(total_ns)
+   local counts = to_table(self.set)
+   print(string.format('%s: %.2f ns per iteration, %.2f%% of time, %.2f IPC.',
+                       self.name, self.active_ns / self.count,
+                       self.active_ns / total_ns * 100,
+                       counts.instructions / counts.cycles))
+end
+
 function selftest ()
    print("selftest: pmu")
    local avail, err = is_available()
