@@ -22,6 +22,7 @@ local alarms = require("lib.yang.alarms")
 local CounterAlarm = alarms.CounterAlarm
 local band, bnot = bit.band, bit.bnot
 local rshift, lshift = bit.rshift, bit.lshift
+local cast = ffi.cast
 local receive, transmit = link.receive, link.transmit
 local rd16, wr16, rd32, wr32 = lwutil.rd16, lwutil.wr16, lwutil.rd32, lwutil.wr32
 local ipv6_equals = lwutil.ipv6_equals
@@ -200,7 +201,6 @@ local ipv4_flag_more_fragments = 0x1
 local ipv4_is_fragment_mask = bit.bor(
    ipv4_fragment_offset_mask,
    bit.lshift(ipv4_flag_more_fragments, ipv4_fragment_offset_bits))
-local cast = ffi.cast
 local function is_ipv4_fragment(pkt)
    local h = cast(ipv4_header_ptr_t, pkt.data)
    return band(ntohs(h.flags_and_fragment_offset), ipv4_is_fragment_mask) ~= 0
@@ -487,7 +487,9 @@ function LwAftr:new(conf)
    o.q = {}
    for _,k in ipairs({'ipv4_in', 'ipv6_in', 'icmpv6_in', 'hairpin',
                       'decap', 'decap_not_found',
-                      'encap', 'encap_not_found', 'encap_ttl', 'encap_mtu',
+                      'encap',
+                      'encap_not_found', 'encap_ttl', 'encap_mtu',
+                      'hairpin_not_found', 'hairpin_ttl', 'hairpin_mtu',
                       'icmpv6_out', 'icmpv4_out', 'ipv4_pre_out',
                       'ipv4_out', 'ipv6_out'}) do
       o.q[k] = ilink.new()
@@ -650,11 +652,13 @@ function LwAftr:tunnel_unreachable(pkt, code, next_hop_mtu)
    return icmp_reply
 end
 
+local cast, copy = ffi.cast, ffi.copy
+
 function LwAftr:receive_ipv6(src, dst)
    -- Strip ethernet headers from incoming IPv6 packets.
    for _=1,link.nreadable(src) do
       local p = receive(src)
-      if cast(ethernet_header_ptr_t, p.data).type == n_ethertype_ipv6 then
+      if rd16(p.data + 12) == n_ethertype_ipv6 then
          p = packet.shiftleft(p, ethernet_header_size)
          counter.add(self.shm["in-ipv6-bytes"], p.length)
          counter.add(self.shm["in-ipv6-packets"])
@@ -674,7 +678,7 @@ function LwAftr:receive_ipv4(src, dst)
    -- Strip ethernet headers from incoming IPv4 packets.
    for _=1,link.nreadable(src) do
       local p = receive(src)
-      if cast(ethernet_header_ptr_t, p.data).type == n_ethertype_ipv4 then
+      if rd16(p.data + 12) == n_ethertype_ipv4 then
          p = packet.shiftleft(p, ethernet_header_size)
          counter.add(self.shm["in-ipv4-bytes"], p.length)
          counter.add(self.shm["in-ipv4-packets"])
@@ -714,7 +718,7 @@ function LwAftr:prepare_decapsulation(src, icmpv6, dst)
          end
       else
          p = packet.shiftright(p, self.softwire_entry_size)
-         local entry = ffi.cast(self.softwire_entry_ptr_t, p.data)
+         local entry = cast(self.softwire_entry_ptr_t, p.data)
          local tunneled_ipv4_header = p.data + self.softwire_entry_size +
             ipv6_header_size
          entry.key.ipv4 = get_ipv4_src_address(tunneled_ipv4_header)
@@ -836,7 +840,7 @@ function LwAftr:prepare_encapsulation(src, dst, pkt_src_link)
 
       if port then
          p = packet.shiftright(p, self.softwire_entry_size)
-         local entry = ffi.cast(self.softwire_entry_ptr_t, p.data)
+         local entry = cast(self.softwire_entry_ptr_t, p.data)
          local ipv4 = p.data + self.softwire_entry_size
          entry.key.ipv4 = get_ipv4_dst_address(ipv4)
          entry.key.psid = port
@@ -852,20 +856,15 @@ function LwAftr:perform_lookup(q)
    local bt = self.binding_table
    local streamer = self.lookup_streamer
    while idx < avail do
-      -- Look up PSIDs for the incoming packets and copy keys to the
-      -- streamer.
       for i = 0, math.min(32, avail - idx) - 1 do
-         local p = q:peek(idx + i)
-         local entry = ffi.cast(self.softwire_entry_ptr_t, p.data)
-         local ipv4, port = entry.key.ipv4, entry.key.psid
-         streamer.entries[i].key.ipv4 = ipv4
-         streamer.entries[i].key.psid = bt:lookup_psid(ipv4, port)
+         local key = cast(self.softwire_entry_ptr_t, q:peek(idx + i).data).key
+         streamer.entries[i].key.ipv4 = key.ipv4
+         streamer.entries[i].key.psid = bt:lookup_psid(key.ipv4, key.psid)
       end
       -- Run the streaming lookup and copy out the results.
       streamer:stream()
       for i = 0, math.min(32, avail - idx) - 1 do
-         local p = q:peek(idx + i)
-         ffi.copy(p.data, streamer.entries[i], self.softwire_entry_size)
+         copy(q:peek(idx + i).data, streamer.entries[i], self.softwire_entry_size)
       end
       idx = idx + 32
    end
@@ -874,8 +873,8 @@ end
 function LwAftr:perform_decapsulation(src, err_not_found, dst)
    for _=1,#src do
       local p = src:pop()
-      local entry = ffi.cast(self.softwire_entry_ptr_t, p.data)
-      local ipv6 = ffi.cast(ipv6_header_ptr_t, p.data + self.softwire_entry_size)
+      local entry = cast(self.softwire_entry_ptr_t, p.data)
+      local ipv6 = cast(ipv6_header_ptr_t, p.data + self.softwire_entry_size)
 
       if (entry.hash ~= 0xffffffff
              and ipv6_equals(ipv6.src_ip, entry.value.b4_ipv6)
@@ -958,11 +957,11 @@ function LwAftr:perform_encapsulation(src, err_not_found, err_ttl, err_mtu, dst)
    for _=1,#src do
       local p = src:pop()
 
-      if ffi.cast(self.softwire_entry_ptr_t, p.data).hash == 0xffffffff then
+      if cast(self.softwire_entry_ptr_t, p.data).hash == 0xffffffff then
          err_not_found:push(packet.shiftleft(p, self.softwire_entry_size))
       else
          -- Source softwire is valid; decapsulate and forward.
-         ffi.copy(self.scratch_softwire, p.data, self.softwire_entry_size)
+         copy(self.scratch_softwire, p.data, self.softwire_entry_size)
          p = packet.shiftleft(p, self.softwire_entry_size)
 
          local ttl = decrement_ttl(p)
@@ -1086,36 +1085,43 @@ function LwAftr:push ()
 
    self:receive_ipv6(self.input.v6, q.ipv6_in)
    self:prepare_decapsulation(q.ipv6_in, q.icmpv6_in, q.decap)
-   self:process_icmpv6(q.icmpv6_in, q.icmpv4_out)
    self:perform_lookup(q.decap)
    self:perform_decapsulation(q.decap, q.decap_not_found, q.ipv4_pre_out)
-   self:process_decapsulation_failures(q.decap_not_found, q.icmpv6_out)
+   local errors = #q.icmpv6_in + #q.decap_not_found
 
    self:apply_hairpinning(q.ipv4_pre_out, q.hairpin, q.ipv4_out, true)
+
+   if #q.hairpin ~= 0 then
+      self:prepare_encapsulation(q.hairpin, q.encap, PKT_HAIRPINNED)
+      self:perform_lookup(q.encap)
+      self:perform_encapsulation(q.encap, q.hairpin_not_found, q.hairpin_ttl,
+                                 q.hairpin_mtu, q.ipv6_out)
+      errors = errors + #q.hairpin_not_found + #q.hairpin_ttl + #q.hairpin_mtu
+   end
 
    self:receive_ipv4(self.input.v4, q.ipv4_in)
    self:prepare_encapsulation(q.ipv4_in, q.encap, PKT_FROM_INET)
    self:perform_lookup(q.encap)
    self:perform_encapsulation(q.encap, q.encap_not_found, q.encap_ttl,
                               q.encap_mtu, q.ipv6_out)
-   self:process_encapsulation_failures(q.encap_not_found, q.encap_ttl,
-                                       q.encap_mtu, q.icmpv4_out, PKT_FROM_INET)
+   errors = errors + #q.encap_not_found + #q.encap_ttl + #q.encap_mtu
 
-   self:prepare_encapsulation(q.hairpin, q.encap, PKT_HAIRPINNED)
-   self:perform_lookup(q.encap)
-   self:perform_encapsulation(q.encap, q.encap_not_found, q.encap_ttl,
-                              q.encap_mtu, q.ipv6_out)
-   -- FIXME: Could hairpinning errors cause a hairpinned error loop?
-   self:process_encapsulation_failures(q.encap_not_found, q.encap_ttl,
-                                       q.encap_mtu, q.icmpv4_out, PKT_HAIRPINNED)
-
-   self:forward_with_rate_limiting(q.icmpv6_out, q.ipv6_out, self.icmpv6_limits)
-   self:forward_with_rate_limiting(q.icmpv4_out, q.ipv4_pre_out,
-                                   self.icmpv4_limits)
-
-   -- See above fixme: here the graph loops back to q.hairpin which may
-   -- not be drained.
-   self:apply_hairpinning(q.ipv4_pre_out, q.hairpin, q.ipv4_out, false)
+   if errors ~= 0 then
+      -- Note that it's possible for e.g. an ICMPv6 error from a B4 that
+      -- would be translated to an ICMPv4 error to have to hairpin back
+      -- to a B4.  In that case the error packet would be buffered on
+      -- q.hairpin until the next breath.
+      self:process_icmpv6(q.icmpv6_in, q.icmpv4_out)
+      self:process_decapsulation_failures(q.decap_not_found, q.icmpv6_out)
+      self:process_encapsulation_failures(q.encap_not_found, q.encap_ttl,
+                                          q.encap_mtu, q.icmpv4_out, PKT_FROM_INET)
+      self:process_encapsulation_failures(q.hairpin_not_found, q.hairpin_ttl,
+                                          q.hairpin_mtu, q.icmpv4_out, PKT_HAIRPINNED)
+      self:forward_with_rate_limiting(q.icmpv6_out, q.ipv6_out, self.icmpv6_limits)
+      self:forward_with_rate_limiting(q.icmpv4_out, q.ipv4_pre_out,
+                                      self.icmpv4_limits)
+      self:apply_hairpinning(q.ipv4_pre_out, q.hairpin, q.ipv4_out, false)
+   end
 
    self:transmit_ipv6(q.ipv6_out, self.output.v6)
    self:transmit_ipv4(q.ipv4_out, self.output.v4)
