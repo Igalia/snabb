@@ -5,6 +5,7 @@ just to produce a binding table config result.
 """
 
 from test_env import ENC, SNABB_CMD, BaseTestCase
+import subprocess
 
 NUM_SOFTWIRES = 10
 
@@ -24,8 +25,13 @@ class TestGenerateBindingTable(BaseTestCase):
 
         <ipv4> <num_ipv4s> <br_address> <b4> <psid_len> <shift>
         """
-        # Get generate-binding-table command output.
-        output = self.run_cmd(self.generation_args)
+        # https://stackoverflow.com/questions/1606795/catching-stdout-in-realtime-from-subprocess
+        # See 'rules of thumb for subprocess'.
+        proc = subprocess.Popen(self.generation_args,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT)
+        output, err = proc.communicate()
+        assert(proc.returncode == 0)
 
         # Split it into lines.
         config = str(output, ENC).split('\n')[:-1]
