@@ -1,5 +1,35 @@
 # Change Log
 
+## [2018.03.01]
+
+* Features:
+
+   - Added limit-finding loadtester.
+   - Move "loadtest" command out of lwaftr.
+   - Process tree runs data-plane processes with busywait=true by default
+   - Sizes for "packetblaster lwaftr" are frame sizes
+
+* Bug fixes:
+
+   - Fix next-hop discovery with multiple devices.
+   - Remove early lwAFTR NUMA affinity check
+   - Make minimum ctable size uniform
+
+* Minor bug fixes:
+
+   - Fix property-based test stall
+   - Fix lwaftr selftest run
+   - Fix data_grammar_from_schema for empty cases
+   - Fix ctable resizing logic
+   - Fix sense of ctable resize limit
+
+* Refactoring:
+
+   - Rewrite random YANG path selector and value generator
+   - Rework alarms timestamping logic
+   - Simplify test
+   - Remove unused imports
+
 ## [2017.11.01]
 
 * Add --trace option to "snabb lwaftr run", enabling a trace log of
