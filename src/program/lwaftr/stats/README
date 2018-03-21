@@ -1,0 +1,15 @@
+Usage:
+  stats [OPTIONS] <pid|name>
+
+Options:
+
+  -h, --help                  Print usage information.
+  -f, --format      <format>  Select output format (default=influxdb)
+
+Prints out lwAFTR counter statistics of a runnign Snabb instance by pid or name.
+
+It needs root privileges.
+
+Examples:
+snabb lwaftr stats 1234
+snabb lwaftr stats --format influxdb lwaftr1
