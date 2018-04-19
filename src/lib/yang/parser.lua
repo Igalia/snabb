@@ -53,11 +53,17 @@ local function end_pos (str)
    if type(str) == "string" then
       return #str
    end
+   if type(str) == "table" then
+      return str:end_pos()
+   end
 end
 
 local function read_char (str, pos)
    if type(str) == "string" then
       return str:sub(pos, pos)
+   end
+   if type(str) == "table" then
+      return str:read(1)
    end
 end
 
@@ -91,6 +97,9 @@ end
 local function read_string (str, start_index, end_index)
    if type(str) == "string" then
       return str:sub(start_index, end_index)
+   end
+   if type(str) == "table" then
+      return str:read(end_index - start_index)
    end
 end
 
