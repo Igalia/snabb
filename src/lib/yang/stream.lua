@@ -4,7 +4,10 @@ local ffi = require("ffi")
 local S = require("syscall")
 local lib = require("core.lib")
 
-local function round_up(x, y) return y*math.ceil(x/y) end
+local function round_up(x, y)
+   local x, y = tonumber(x), tonumber(y)
+   return y*math.ceil(x/y)
+end
 
 function open_output_byte_stream(filename)
    local fd, err =
