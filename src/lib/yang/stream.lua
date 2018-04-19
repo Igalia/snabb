@@ -161,6 +161,24 @@ function open_input_byte_stream(filename)
          end,
          close = function() ret:close() end,
          end_pos = function() return end_pos end,
+         substr = function (self, i, j)
+            assert(j > i)
+            ret:seek(i)
+            local size = j - i
+            local str = ffi.string(ret:read(size), size)
+            ret:seek(pos)
+            return str
+         end,
+         index = function (self, start, needle)
+            ret:seek(start)
+            for i=start,end_pos do
+               if self:read() == needle then
+                  ret:seek(pos)
+                  return i
+               end
+            end
+            ret:seek(pos)
+         end,
       }
    end
    return ret
