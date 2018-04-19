@@ -49,9 +49,21 @@ function Parser:error(msg, ...)
    error(('%s: error: '..msg):format(self:loc(), ...))
 end
 
+local function end_pos (str)
+   if type(str) == "string" then
+      return #str
+   end
+end
+
+local function read_char (str, pos)
+   if type(str) == "string" then
+      return str:sub(pos, pos)
+   end
+end
+
 function Parser:read_char()
-   if self.pos <= #self.str then
-      local ret = self.str:sub(self.pos,self.pos)
+   if self.pos <= end_pos(self.str) then
+      local ret = read_char(self.str, self.pos)
       self.pos = self.pos + 1
       return ret
    end
@@ -76,12 +88,18 @@ function Parser:next()
    return chr
 end
 
+local function read_string (str, start_index, end_index)
+   if type(str) == "string" then
+      return str:sub(start_index, end_index)
+   end
+end
+
 function Parser:peek_n(n)
    local end_index = self.pos + n - 1
-   if end_index < #self.str then
-      return self:peek() .. self.str:sub(self.pos, (end_index - 1))
+   if end_index >= end_pos(self.str) then
+      end_index = end_pos(self.str)
    end
-   return self:peek() .. self.str:sub(self.pos)
+   return self:peek() .. read_string(self.str, self.pos, (end_index - 1))
 end
 
 function Parser:check(expected)
