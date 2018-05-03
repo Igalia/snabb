@@ -14,7 +14,7 @@ local ctable = require('lib.ctable')
 local cltable = require('lib.cltable')
 
 local MAGIC = "yangconf"
-local VERSION = 0x00008000
+local VERSION = 0x00008001
 
 local header_t = ffi.typeof([[
 struct {
@@ -24,10 +24,10 @@ struct {
    uint32_t source_mtime_nsec;
    uint32_t schema_name;
    uint32_t revision_date;
-   uint32_t data_start;
-   uint32_t data_len;
-   uint32_t strtab_start;
-   uint32_t strtab_len;
+   uint64_t data_start;
+   uint64_t data_len;
+   uint64_t strtab_start;
+   uint64_t strtab_len;
 }
 ]])
 
@@ -277,7 +277,7 @@ function data_compiler_from_grammar(emit_data, schema_name, schema_revision)
       local stream = stream.open_temporary_output_byte_stream(filename)
       local strtab = string_table_builder()
       local header = header_t(
-         MAGIC, VERSION, source_mtime.sec, source_mtime.nsec,
+         MAGIC, source_mtime.sec, source_mtime.nsec,
          strtab:intern(schema_name), strtab:intern(schema_revision or ''))
       -- Write with empty data_len etc, fix it later.
       stream:write_ptr(header, header_t)
@@ -458,8 +458,6 @@ function load_compiled_data(stream)
    local header = stream:read_ptr(header_t)
    assert(ffi.string(header.magic, ffi.sizeof(header.magic)) == MAGIC,
           "expected file to begin with "..MAGIC)
-   assert(header.version == VERSION,
-          "incompatible version: "..header.version)
    stream:seek(header.strtab_start)
    local strtab = read_string_table(stream, header.strtab_len)
    local ret = {}

@@ -4,7 +4,10 @@ local ffi = require("ffi")
 local S = require("syscall")
 local lib = require("core.lib")
 
-local function round_up(x, y) return y*math.ceil(x/y) end
+local function round_up(x, y)
+   local x, y = tonumber(x), tonumber(y)
+   return y*math.ceil(x/y)
+end
 
 function open_output_byte_stream(filename)
    local fd, err =
@@ -140,8 +143,8 @@ function open_input_byte_stream(filename)
       return ffi.cast(ffi.typeof('$*', type),
                       ret:read(ffi.sizeof(type) * count))
    end
-   function ret:read_char()
-      return ffi.string(ret:read(1), 1)
+   function ret:read_char(n)
+      return ffi.string(ret:read(n), n)
    end
    function ret:read_string()
       local count = size - pos
@@ -155,11 +158,30 @@ function open_input_byte_stream(filename)
          mtime_sec = ret.mtime_sec,
          mtime_nsec = ret.mtime_nsec,
          read = function(self, n)
-            assert(n==1)
+            n = n or 1
             if pos == end_pos then return nil end
-            return ret:read_char()
+            return ret:read_char(n)
          end,
-         close = function() ret:close() end
+         close = function() ret:close() end,
+         end_pos = function() return end_pos end,
+         substr = function (self, i, j)
+            assert(j > i)
+            ret:seek(i)
+            local size = j - i
+            local str = ffi.string(ret:read(size), size)
+            ret:seek(pos)
+            return str
+         end,
+         index = function (self, start, needle)
+            ret:seek(start)
+            for i=start,end_pos do
+               if self:read() == needle then
+                  ret:seek(pos)
+                  return i
+               end
+            end
+            ret:seek(pos)
+         end,
       }
    end
    return ret
