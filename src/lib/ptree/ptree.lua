@@ -13,6 +13,10 @@ local worker = require("core.worker")
 local cltable = require("lib.cltable")
 local cpuset = require("lib.cpuset")
 local scheduling = require("lib.scheduling")
+local mem = require("lib.stream.mem")
+local socket = require("lib.stream.socket")
+local fiber = require("lib.fibers.fiber")
+local sched = require("lib.fibers.sched")
 local yang = require("lib.yang.yang")
 local util = require("lib.yang.util")
 local schema = require("lib.yang.schema")
@@ -26,6 +30,14 @@ local support = require("lib.ptree.support")
 local channel = require("lib.ptree.channel")
 local trace = require("lib.ptree.trace")
 local alarms = require("lib.yang.alarms")
+local json = require("lib.ptree.json")
+local queue = require('lib.fibers.queue')
+local fiber_sleep = require('lib.fibers.sleep').sleep
+local inotify = require("lib.ptree.inotify")
+local counter = require("core.counter")
+local cond = require("lib.fibers.cond")
+
+local call_with_output_string = mem.call_with_output_string
 
 local Manager = {}
 
@@ -35,7 +47,8 @@ if os.getenv('SNABB_MANAGER_VERBOSE') then default_log_level = "DEBUG" end
 
 local manager_config_spec = {
    name = {},
-   socket_file_name = {default='config-leader-socket'},
+   rpc_socket_file_name = {default='config-leader-socket'},
+   notification_socket_file_name = {default='notifications'},
    setup_fn = {required=true},
    -- Could relax this requirement.
    initial_configuration = {required=true},
@@ -48,14 +61,12 @@ local manager_config_spec = {
    Hz = {default=100},
 }
 
-local function open_socket (file)
-   S.signal('pipe', 'ign')
-   local socket = assert(S.socket("unix", "stream, nonblock"))
-   S.unlink(file) --unlink to avoid EINVAL on bind()
-   local sa = S.t.sockaddr_un(file)
-   assert(socket:bind(sa))
-   assert(socket:listen())
-   return socket
+local function ensure_absolute(file_name)
+   if file_name:match('^/') then
+      return file_name
+   else
+      return shm.root..'/'..tostring(S.getpid())..'/'..file_name
+   end
 end
 
 function new_manager (conf)
@@ -65,15 +76,14 @@ function new_manager (conf)
    ret.name = conf.name
    ret.log_level = assert(log_levels[conf.log_level])
    ret.cpuset = conf.cpuset
-   ret.socket_file_name = conf.socket_file_name
-   if not ret.socket_file_name:match('^/') then
-      local instance_dir = shm.root..'/'..tostring(S.getpid())
-      ret.socket_file_name = instance_dir..'/'..ret.socket_file_name
-   end
+   ret.rpc_socket_file_name = ensure_absolute(conf.rpc_socket_file_name)
+   ret.notification_socket_file_name = ensure_absolute(
+      conf.notification_socket_file_name)
    ret.schema_name = conf.schema_name
    ret.default_schema = conf.default_schema or conf.schema_name
    ret.support = support.load_schema_config_support(conf.schema_name)
    ret.peers = {}
+   ret.notification_peers = {}
    ret.setup_fn = conf.setup_fn
    ret.period = 1/conf.Hz
    ret.worker_default_scheduling = conf.worker_default_scheduling
@@ -87,8 +97,8 @@ function new_manager (conf)
       -- Start trace with initial configuration.
       local p = path_data.printer_for_schema_by_name(
          ret.schema_name, "/", true, "yang", false)
-      local conf_str = p(conf.initial_configuration, yang.string_io_file())
-      ret.trace:record('set-config', {schema=ret.schema_name, config=conf_str})
+      local str = call_with_output_string(p, conf.initial_configuration)
+      ret.trace:record('set-config', {schema=ret.schema_name, config=str})
    end
 
    ret.rpc_callee = rpc.prepare_callee('snabb-config-leader-v1')
@@ -159,7 +169,77 @@ end
 function Manager:start ()
    if self.name then engine.claim_name(self.name) end
    self.cpuset:bind_to_numa_node()
-   self.socket = open_socket(self.socket_file_name)
+   require('lib.fibers.file').install_poll_io_handler()
+   self.sched = fiber.current_scheduler
+   fiber.spawn(function () self:accept_rpc_peers() end)
+   fiber.spawn(function () self:accept_notification_peers() end)
+   fiber.spawn(function () self:notification_poller() end)
+end
+
+function Manager:call_with_cleanup(closeable, f, ...)
+   local ok, err = pcall(f, ...)
+   closeable:close()
+   if not ok then self:warn('%s', tostring(err)) end
+end
+
+function Manager:accept_rpc_peers ()
+   local sock = socket.listen_unix(self.rpc_socket_file_name, {ephemeral=true})
+   self:call_with_cleanup(sock, function()
+      while true do
+         local peer = sock:accept()
+         fiber.spawn(function() self:handle_rpc_peer(peer) end)
+      end
+   end)
+end
+
+function Manager:accept_notification_peers ()
+   local sock = socket.listen_unix(self.notification_socket_file_name,
+                                   {ephemeral=true})
+   fiber.spawn(function()
+      while true do
+         local peer = sock:accept()
+         fiber.spawn(function() self:handle_notification_peer(peer) end)
+      end
+   end)
+end
+
+function Manager:handle_rpc_peer(peer)
+   self:call_with_cleanup(peer, function()
+      while true do
+         local prefix = peer:read_line('discard')
+         if prefix == nil then return end -- EOF.
+         local len = assert(tonumber(prefix), 'not a number: '..prefix)
+         assert(tostring(len) == prefix, 'bad number: '..prefix)
+         -- FIXME: Use a streaming parse.
+         local request = peer:read_chars(len)
+         local reply = self:handle(peer, request)
+         peer:write_chars(tostring(#reply))
+         peer:write_chars('\n')
+         peer:write_chars(reply)
+         peer:flush_output()
+      end
+   end)
+   if self.listen_peer == peer then self.listen_peer = nil end
+end
+
+function Manager:handle_notification_peer(peer)
+   local q = queue.new()
+   self.notification_peers[q] = true
+   function q:close()
+      self.notification_peers[q] = nil
+      peer:close()
+   end
+   self:call_with_cleanup(q, function()
+      while true do
+         json.write_json_object(peer, q:get())
+         peer:write_chars("\n")
+         peer:flush_output()
+      end
+   end)
+end
+
+function Manager:run_scheduler()
+   self.sched:run(engine.now())
 end
 
 function Manager:start_worker(sched_opts)
@@ -177,6 +257,7 @@ function Manager:stop_worker(id)
    self:enqueue_config_actions_for_worker(id, stop_actions)
    self:send_messages_to_workers()
    self.workers[id].shutting_down = true
+   self.workers[id].cancel:signal()
 end
 
 function Manager:remove_stale_workers()
@@ -204,7 +285,9 @@ function Manager:acquire_cpu_for_worker(id, app_graph)
    for name, init in pairs(app_graph.apps) do
       if type(init.arg) == 'table' then
          for k, v in pairs(init.arg) do
-            if k == 'pciaddr' then table.insert(pci_addresses, v) end
+            if k == 'pciaddr' and not lib.is_iface(v) then
+               table.insert(pci_addresses, v)
+            end
          end
       end
    end
@@ -218,17 +301,90 @@ function Manager:compute_scheduling_for_worker(id, app_graph)
    return ret
 end
 
+local counters = {active={}, archived={}, aggregated={}}
+
+local function is_counter (name)
+   return lib.basename(name):match("%.counter$")
+end
+-- Creates an aggregated counter and saves worker counter in active table.
+-- Active table is indexed by aggregated counter name.
+local function create_counter (worker_pid, name)
+   local k = name:gsub(worker_pid, S.getpid())
+   if not counters.aggregated[k] then
+      counters.aggregated[k] = counter.create(k)
+   end
+   if not counters.active[k] then counters.active[k] = {} end
+   if not counters.active[k][name] then
+      counters.active[k][name] = counter.open(name)
+   end
+end
+-- Removes a worker counter from the active table and stores its value to
+-- archived. Archived table is indexed by aggregated counter name.
+local function archive_counter (name)
+   local k = name:gsub(worker_pid, S.getpid())
+   local c = assert(counters.active[k] and counters.active[k][name])
+   local val = counter.read(c)
+   counter.delete(name)
+   counters.active[k][name] = nil
+   if not counters.archived[k] then
+      counters.archived[k] = ffi.new("uint64_t[1]")
+   end
+   counters.archived[k][0] = counters.archived[k][0] + val
+end
+-- For all workers counter that belong to the same aggregated name, computed
+-- accumulative sum.  Accumulative sum is initialized to aggregated counter
+-- value if any.
+local function compute_aggregated_value (k)
+   if not counters.archived[k] then return 0 end
+   local ret = counters.archived[k][0]
+   for _,c in pairs(counters.active[k]) do
+      ret = ret + counter.read(c)
+   end
+   return ret
+end
+
 function Manager:start_worker_for_graph(id, graph)
    local scheduling = self:compute_scheduling_for_worker(id, graph)
    self:info('Starting worker %s.', id)
    self.workers[id] = { scheduling=scheduling,
                         pid=self:start_worker(scheduling),
-                        queue={}, graph=graph }
+                        queue={}, graph=graph,
+                        cancel = cond.new() }
    self:state_change_event('worker_starting', id)
    self:debug('Worker %s has PID %s.', id, self.workers[id].pid)
    local actions = self.support.compute_config_actions(
       app_graph.new(), self.workers[id].graph, {}, 'load')
    self:enqueue_config_actions_for_worker(id, actions)
+
+   -- Manage aggregated counters (creation and removal).
+   fiber.spawn(function ()
+      local worker = self.workers[id]
+      local dir = shm.root..'/'..worker.pid
+      local rx = inotify.recursive_directory_inventory_events(dir, worker.cancel:wait_operation())
+      for event in rx.get, rx do
+         if is_counter(event.name) then
+            local name = event.name:gsub(shm.root, '')
+            if event.kind == 'creat' then
+               create_counter(worker.pid, name)
+            elseif event.kind == 'rm' then
+               -- Move counter from active to archive.
+               archive_counter(name)
+            end
+         end
+      end
+   end)
+
+   -- Update aggregated counters.
+   fiber.spawn(function ()
+      while true do
+         for k,c in pairs(counters.aggregated) do
+            counter.set(c, compute_aggregated_value(k))
+         end
+         counter.commit()
+         fiber_sleep(1)
+      end
+   end)
+
    return self.workers[id]
 end
 
@@ -280,8 +436,8 @@ function Manager:rpc_get_config (args)
       end
       local printer = path_data.printer_for_schema_by_name(
          args.schema, args.path, true, args.format, args.print_default)
-      local config = printer(self.current_configuration, yang.string_io_file())
-      return { config = config }
+      local str = call_with_output_string(printer, self.current_configuration)
+      return { config = str }
    end
    local success, response = pcall(getter)
    if success then return response else return {status=1, error=response} end
@@ -363,7 +519,8 @@ function Manager:handle_rpc_update_config (args, verb, compute_update_fn)
    local path = path_mod.normalize_path(args.path)
    local parser = path_data.parser_for_schema_by_name(args.schema, path)
    self:update_configuration(compute_update_fn(args.schema, path),
-                             verb, path, parser(args.config))
+                             verb, path,
+                             parser(mem.open_input_string(args.config)))
    return {}
 end
 
@@ -398,8 +555,7 @@ function Manager:foreign_rpc_get_config (schema_name, path, format,
    local foreign_config = translate.get_config(self.current_configuration)
    local printer = path_data.printer_for_schema_by_name(
       schema_name, path, true, format, print_default)
-   local config = printer(foreign_config, yang.string_io_file())
-   return { config = config }
+   return { config = call_with_output_string(printer, foreign_config) }
 end
 function Manager:foreign_rpc_get_state (schema_name, path, format,
                                        print_default)
@@ -408,23 +564,24 @@ function Manager:foreign_rpc_get_state (schema_name, path, format,
    local foreign_state = translate.get_state(self:get_native_state())
    local printer = path_data.printer_for_schema_by_name(
       schema_name, path, false, format, print_default)
-   local state = printer(foreign_state, yang.string_io_file())
-   return { state = state }
+   return { state = call_with_output_string(printer, foreign_state) }
 end
 function Manager:foreign_rpc_set_config (schema_name, path, config_str)
    path = path_mod.normalize_path(path)
    local translate = self:get_translator(schema_name)
    local parser = path_data.parser_for_schema_by_name(schema_name, path)
-   local updates = translate.set_config(self.current_configuration, path,
-                                        parser(config_str))
+   local updates = translate.set_config(
+      self.current_configuration, path,
+      parser(mem.open_input_string(config_str)))
    return self:apply_translated_rpc_updates(updates)
 end
 function Manager:foreign_rpc_add_config (schema_name, path, config_str)
    path = path_mod.normalize_path(path)
    local translate = self:get_translator(schema_name)
    local parser = path_data.parser_for_schema_by_name(schema_name, path)
-   local updates = translate.add_config(self.current_configuration, path,
-                                        parser(config_str))
+   local updates = translate.add_config(
+      self.current_configuration, path,
+      parser(mem.open_input_string(config_str)))
    return self:apply_translated_rpc_updates(updates)
 end
 function Manager:foreign_rpc_remove_config (schema_name, path)
@@ -500,7 +657,7 @@ function Manager:rpc_get_state (args)
       local state = self:get_native_state()
       local printer = path_data.printer_for_schema_by_name(
          self.schema_name, args.path, false, args.format, args.print_default)
-      return { state = printer(state, yang.string_io_file()) }
+      return { state = call_with_output_string(printer, state) }
    end
    local success, response = pcall(getter)
    if success then return response else return {status=1, error=response} end
@@ -514,131 +671,34 @@ function Manager:rpc_get_alarms_state (args)
       local state = {
          alarms = alarms.get_state()
       }
-      state = printer(state, yang.string_io_file())
-      return { state = state }
+      return { state = call_with_output_string(printer, state) }
    end
    local success, response = pcall(getter)
    if success then return response else return {status=1, error=response} end
 end
 
-function Manager:handle (payload)
-   return rpc.handle_calls(self.rpc_callee, payload, self.rpc_handler)
+function Manager:handle (peer, payload)
+   -- FIXME: Stream call and response instead of building strings.
+   self.rpc_peer = peer
+   local ret = mem.call_with_output_string(
+      rpc.handle_calls, self.rpc_callee, mem.open_input_string(payload),
+      self.rpc_handler)
+   self.rpc_peer = nil
+   return ret
 end
 
-local dummy_unix_sockaddr = S.t.sockaddr_un()
-
-function Manager:handle_calls_from_peers()
-   local peers = self.peers
+-- Spawn in a fiber.
+function Manager:notification_poller ()
    while true do
-      local fd, err = self.socket:accept(dummy_unix_sockaddr)
-      if not fd then
-         if err.AGAIN then break end
-         assert(nil, err)
-      end
-      fd:nonblock()
-      table.insert(peers, { state='length', len=0, fd=fd })
-   end
-   local i = 1
-   while i <= #peers do
-      local peer = peers[i]
-      local visit_peer_again = false
-      while peer.state == 'length' do
-         local ch, err = peer.fd:read(nil, 1)
-         if not ch then
-            if err.AGAIN then break end
-            peer.state = 'error'
-            peer.msg = tostring(err)
-         elseif ch == '\n' then
-            peer.pos = 0
-            peer.buf = ffi.new('uint8_t[?]', peer.len)
-            peer.state = 'payload'
-         elseif tonumber(ch) then
-            peer.len = peer.len * 10 + tonumber(ch)
-            if peer.len > 1e8 then
-               peer.state = 'error'
-               peer.msg = 'length too long: '..peer.len
-            end
-         elseif ch == '' then
-            if peer.len == 0 then
-               peer.state = 'done'
-            else
-               peer.state = 'error'
-               peer.msg = 'unexpected EOF'
-            end
-         else
-            peer.state = 'error'
-            peer.msg = 'unexpected character: '..ch
-         end
-      end
-      while peer.state == 'payload' do
-         if peer.pos == peer.len then
-            peer.state = 'ready'
-            peer.payload = ffi.string(peer.buf, peer.len)
-            peer.buf, peer.len = nil, nil
-         else
-            local count, err = peer.fd:read(peer.buf + peer.pos,
-                                            peer.len - peer.pos)
-            if not count then
-               if err.AGAIN then break end
-               peer.state = 'error'
-               peer.msg = tostring(err)
-            elseif count == 0 then
-               peer.state = 'error'
-               peer.msg = 'short read'
-            else
-               peer.pos = peer.pos + count
-               assert(peer.pos <= peer.len)
+      local notifications = alarms.notifications()
+      if #notifications == 0 then
+         fiber_sleep(1/50) -- poll at 50 Hz.
+      else
+         for q,_ in pairs(self.notification_peers) do
+            for _,notification in ipairs(notifications) do
+               q:put(notification)
             end
          end
-      end
-      while peer.state == 'ready' do
-         -- Uncomment to get backtraces.
-         self.rpc_peer = peer
-         -- local success, reply = true, self:handle(peer.payload)
-         local success, reply = pcall(self.handle, self, peer.payload)
-         self.rpc_peer = nil
-         peer.payload = nil
-         if success then
-            assert(type(reply) == 'string')
-            reply = #reply..'\n'..reply
-            peer.state = 'reply'
-            peer.buf = ffi.new('uint8_t[?]', #reply+1, reply)
-            peer.pos = 0
-            peer.len = #reply
-         else
-            peer.state = 'error'
-            peer.msg = reply
-         end
-      end
-      while peer.state == 'reply' do
-         if peer.pos == peer.len then
-            visit_peer_again = true
-            peer.state = 'length'
-            peer.buf, peer.pos = nil, nil
-            peer.len = 0
-         else
-            local count, err = peer.fd:write(peer.buf + peer.pos,
-                                             peer.len - peer.pos)
-            if not count then
-               if err.AGAIN then break end
-               peer.state = 'error'
-               peer.msg = tostring(err)
-            elseif count == 0 then
-               peer.state = 'error'
-               peer.msg = 'short write'
-            else
-               peer.pos = peer.pos + count
-               assert(peer.pos <= peer.len)
-            end
-         end
-      end
-      if peer.state == 'done' or peer.state == 'error' then
-         if peer.state == 'error' then self:warn('%s', peer.msg) end
-         peer.fd:close()
-         table.remove(peers, i)
-         if self.listen_peer == peer then self.listen_peer = nil end
-      elseif not visit_peer_again then
-         i = i + 1
       end
    end
 end
@@ -713,10 +773,17 @@ function Manager:handle_alarm (worker, alarm)
 end
 
 function Manager:stop ()
-   for _,peer in ipairs(self.peers) do peer.fd:close() end
-   self.peers = {}
-   self.socket:close()
-   S.unlink(self.socket_file_name)
+   -- Call shutdown for 0.1s or until it returns true (all tasks cancelled).
+   local now = C.get_monotonic_time()
+   local threshold = now + 0.1
+   while now < threshold do
+      if self.sched:shutdown() then break end
+   end
+   if now >= threshold then
+      io.stderr:write("Warning: there are still tasks pending\n")
+   end
+
+   require('lib.fibers.file').uninstall_poll_io_handler()
 
    for id, worker in pairs(self.workers) do
       if not worker.shutting_down then self:stop_worker(id) end
@@ -749,7 +816,7 @@ function Manager:main (duration)
       next_time = now + self.period
       if timer.ticks then timer.run_to_time(now * 1e9) end
       self:remove_stale_workers()
-      self:handle_calls_from_peers()
+      self:run_scheduler()
       self:send_messages_to_workers()
       self:receive_alarms_from_workers()
       now = C.get_monotonic_time()

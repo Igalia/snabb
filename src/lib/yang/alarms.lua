@@ -9,6 +9,12 @@ local counter = require("core.counter")
 local format_date_as_iso_8601 = util.format_date_as_iso_8601
 local parse_date_as_iso_8601 = util.parse_date_as_iso_8601
 
+local control = {
+   alarm_shelving = {
+      shelf = {}
+   }
+}
+
 local state = {
    alarm_inventory = {
       alarm_type = {},
@@ -17,7 +23,48 @@ local state = {
       alarm = {},
       number_of_alarms = 0,
    },
+   shelved_alarms = {
+      shelved_alarms = {}
+   },
+   notifications = {
+      alarm = {},
+      alarm_inventory_changed = {},
+      operator_action = {}
+   }
 }
+
+local function clear_notifications ()
+   state.notifications.alarm = {}
+   state.notifications.alarm_inventory_changed = {}
+   state.notifications.operator_action = {}
+end
+
+function notifications ()
+   local ret = {}
+   local notifications = state.notifications
+   for k,v in pairs(notifications.alarm) do
+      table.insert(ret, v)
+   end
+   for k,v in pairs(notifications.alarm_inventory_changed) do
+      table.insert(ret, v)
+   end
+   for k,v in pairs(notifications.operator_action) do
+      table.insert(ret, v)
+   end
+   clear_notifications()
+   return ret
+end
+
+local function table_size (t)
+   local size = 0
+   for _ in pairs(t) do size = size + 1 end
+   return size
+end
+
+local function table_is_empty(t)
+   for k,v in pairs(t) do return false end
+   return true
+end
 
 function get_state ()
    -- status-change is stored as an array while according to ietf-alarms schema
@@ -102,6 +149,9 @@ function build_summary (alarms)
       end
       ret[severity] = entry
    end
+   if not table_is_empty(state.shelved_alarms.shelved_alarms) then
+      ret['shelved_alarms'] = table_size(state.shelved_alarms.shelved_alarms)
+   end
    return ret
 end
 
@@ -148,6 +198,21 @@ function do_add_to_inventory (k, v)
    end
    state.alarm_inventory.alarm_type[key] = v
    state.alarm_inventory.alarm_type[key].resource = resource
+   alarm_inventory_changed()
+end
+
+
+local function new_notification (event, value)
+   value = value or {}
+   assert(type(value) == "table")
+   local ret = {event=event}
+   for k,v in pairs(value) do ret[k] = v end
+   return ret
+end
+
+function alarm_inventory_changed()
+   table.insert(state.notifications.alarm_inventory_changed,
+                new_notification('alarm-inventory-changed'))
 end
 
 -- Single point to access alarm keys.
@@ -181,13 +246,6 @@ function alarm_keys:normalize (key)
    local alarm_type_qualifier = key.alarm_type_qualifier or ''
    return self:fetch(resource, alarm_type_id, alarm_type_qualifier)
 end
-
-local function table_size (t)
-   local size = 0
-   for _ in pairs(t) do size = size + 1 end
-   return size
-end
-
 
 -- Contains a table with all the declared alarms.
 local alarm_list = {
@@ -268,13 +326,19 @@ end
 -- The entry with latest time-stamp in this list MUST correspond to the leafs
 -- 'is-cleared', 'perceived-severity' and 'alarm-text' for the alarm.
 -- The time-stamp for that entry MUST be equal to the 'last-changed' leaf.
-local function add_status_change (alarm, status)
+local function add_status_change (key, alarm, status)
    alarm.status_change = alarm.status_change or {}
    alarm.perceived_severity = status.perceived_severity
    alarm.alarm_text = status.alarm_text
    alarm.last_changed = status.time
    state.alarm_list.last_changed = status.time
    table.insert(alarm.status_change, status)
+   add_alarm_notification(key, status)
+end
+
+function add_alarm_notification (key, status)
+   local notifications = state.notifications.alarm
+   notifications[key] = new_notification('alarm-notification', status)
 end
 
 -- Creates a new alarm.
@@ -289,7 +353,7 @@ local function new_alarm (key, args)
       perceived_severity = args.perceived_severity or ret.perceived_severity,
       alarm_text = args.alarm_text or ret.alarm_text,
    }
-   add_status_change(ret, status)
+   add_status_change(key, ret, status)
    ret.last_changed = assert(status.time)
    ret.time_created = assert(ret.last_changed)
    ret.is_cleared = args.is_cleared
@@ -323,23 +387,33 @@ end
 -- An alarm gets updated if it needs a status change.  A status change implies
 -- to add a new status change to the alarm and update the alarm 'is_cleared'
 -- flag.
-local function update_alarm (alarm, args)
+local function update_alarm (key, alarm, args)
    if needs_status_change(alarm, args) then
       local status = {
          time = assert(format_date_as_iso_8601()),
          perceived_severity = assert(args.perceived_severity or alarm.perceived_severity),
          alarm_text = assert(args.alarm_text or alarm.alarm_text),
       }
-      add_status_change(alarm, status)
+      add_status_change(key, alarm, status)
       alarm.is_cleared = args.is_cleared
    end
 end
 
--- Check up if the alarm already exists in state.alarm_list.
-local function lookup_alarm (key)
-   return state.alarm_list.alarm[key]
+local function is_shelved(key)
+   return control.alarm_shelving.shelf[key]
 end
 
+-- Check up if the alarm already exists in state.alarm_list.
+local function lookup_alarm (key)
+   if is_shelved(key) then
+      return state.shelved_alarms.shelved_alarms[key]
+   else
+      return state.alarm_list.alarm[key]
+   end
+end
+
+-- Notifications are only sent when a new alarm is raised, re-raised after being
+-- cleared and when an alarm is cleared.
 function raise_alarm (key, args)
    assert(key)
    args = args or {}
@@ -349,7 +423,7 @@ function raise_alarm (key, args)
    if not alarm then
       create_alarm(key, args)
    else
-      update_alarm(alarm, args)
+      update_alarm(key, alarm, args)
    end
 end
 
@@ -361,8 +435,24 @@ function clear_alarm (key)
    key = alarm_keys:normalize(key)
    local alarm = lookup_alarm(key)
    if alarm then
-      update_alarm(alarm, args)
+      update_alarm(key, alarm, args)
    end
+end
+
+-- Alarm shelving.
+
+function shelve_alarm (key, alarm)
+   alarm = alarm or state.alarm_list.alarm[key]
+   state.shelved_alarms.shelved_alarms[key] = alarm
+   state.alarm_list.alarm[key] = nil
+   control.alarm_shelving.shelf[key] = true
+end
+
+function unshelve_alarm (key, alarm)
+   alarm = alarm or state.shelved_alarms.shelved_alarms[key]
+   state.alarm_list.alarm[key] = alarm
+   state.shelved_alarms.shelved_alarms[key] = nil
+   control.alarm_shelving.shelf[key] = nil
 end
 
 -- Set operator state.
@@ -373,21 +463,36 @@ function set_operator_state (key, args)
    assert(args.state and operator_states[args.state],
           'Not a valid operator state: '..args.state)
    key = alarm_keys:normalize(key)
-   local alarm = state.alarm_list.alarm[key]
-   if not alarm then
-      error('Set operate state operation failed. Could not locate alarm.')
+   local alarm
+   if args.state == 'un-shelved' then
+      alarm = assert(state.shelved_alarms.shelved_alarms[key], 'Could not locate alarm in shelved-alarms')
+      control.alarm_shelving.shelf[key] = nil
+   else
+      alarm = assert(state.alarm_list.alarm[key], 'Could not locate alarm in alarm-list')
    end
    if not alarm.operator_state_change then
       alarm.operator_state_change = {}
    end
    local time = format_date_as_iso_8601()
-   table.insert(alarm.operator_state_change, {
+   local status = {
       time = time,
       operator = 'admin',
       state = args.state,
       text = args.text,
-   })
+   }
+   table.insert(alarm.operator_state_change, status)
+   if args.state == 'shelved' then
+      shelve_alarm(key, alarm)
+   elseif args.state == 'un-shelved' then
+      unshelve_alarm(key, alarm)
+   end
+   add_operator_action_notification(key, status)
    return true
+end
+
+function add_operator_action_notification (key, status)
+   local operator_action = state.notifications.operator_action
+   operator_action[key] = new_notification('operator-action', status)
 end
 
 -- Purge alarms.
@@ -784,6 +889,37 @@ function selftest ()
    local alarm = assert(state.alarm_list.alarm[key])
    assert(table_size(alarm.operator_state_change) == 1)
    assert(purge_alarms({operator_state_filter={state='ack'}}) == 1)
+
+   -- Shelving and alarm should:
+   -- - Add shelving criteria to alarms/control.
+   -- - Move alarm from alarms/alarm-list to alarms/shelved-alarms.
+   -- - Do not generate notifications if the alarm changes its status.
+   -- - Increase the number of shelved alarms in summary.
+   local key = alarm_keys:fetch('nic-v4', 'arp-resolution')
+   raise_alarm(key, {perceived_severity='minor'})
+   local success = set_operator_state(key, {state='shelved'})
+   assert(success)
+   assert(table_size(control.alarm_shelving.shelf) == 1)
+   assert(table_size(state.shelved_alarms.shelved_alarms) == 1)
+
+   -- Changing alarm status should create a new status in shelved alarm.
+   alarm = state.shelved_alarms.shelved_alarms[key]
+   assert(table_size(alarm.status_change) == 1)
+   raise_alarm(key, {perceived_severity='critical'})
+   assert(table_size(state.alarm_list.alarm) == 0)
+   assert(table_size(alarm.status_change) == 2)
+
+   -- Un-shelving and alarm should:
+   -- - Remove shelving criteria from alarms/control.
+   -- - Move alarm from alarms/shelved-alarms to alarms/alarm-list.
+   -- - The alarm now generates notifications if it changes its status.
+   -- - Decrease the number of shelved alarms in summary.
+   local success = set_operator_state(key, {state='un-shelved'})
+   assert(success)
+   assert(table_size(control.alarm_shelving.shelf) == 0)
+   raise_alarm(key, {perceived_severity='critical'})
+   assert(not state.shelved_alarms.shelved_alarms[key])
+   assert(state.alarm_list.alarm[key])
 
    print("ok")
 end
