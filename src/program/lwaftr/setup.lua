@@ -62,24 +62,6 @@ function lwaftr_app(c, conf)
    local function append(t, elem) table.insert(t, elem) end
    local function prepend(t, elem) table.insert(t, 1, elem) end
 
-   -- Claim the name if one is defined.
-   local function switch_names(config)
-      local currentname = engine.program_name
-      local name = config.softwire_config.name
-      -- Don't do anything if the name isn't set.
-      if name == nil then
-         return
-      end
-
-      local success, err = pcall(engine.claim_name, name)
-      if success == false then
-         -- Restore the previous name.
-         config.softwire_config.name = currentname
-         assert(success, err)
-      end
-   end
-   switch_names(conf)
-
    local device, id, queue = lwutil.parse_instance(conf)
 
    -- Global interfaces
@@ -222,6 +204,21 @@ local function link_sink(c, v4_out, v6_out)
    config.link(c, 'fragmenterv6.output -> '..v6_out)
 end
 
+function load_kernel_iface (c, conf, v4_nic_name, v6_nic_name)
+   local RawSocket = require("apps.socket.raw").RawSocket
+   local v4_iface, id, queue = lwutil.parse_instance(conf)
+   local v6_iface = queue.external_interface.dev_info
+   local dev_info = {rx = "rx", tx = "tx"}
+
+   lwaftr_app(c, conf, v6_iface)
+
+   config.app(c, v4_nic_name, RawSocket, v4_iface)
+   config.app(c, v6_nic_name, RawSocket, v6_iface)
+
+   link_source(c, v4_nic_name..'.'..dev_info.tx, v6_nic_name..'.'..dev_info.tx)
+   link_sink(c,   v4_nic_name..'.'..dev_info.rx, v6_nic_name..'.'..dev_info.rx)
+end
+
 function load_phy(c, conf, v4_nic_name, v6_nic_name, ring_buffer_size)
    local v4_pci, id, queue = lwutil.parse_instance(conf)
    local v6_pci = queue.external_interface.device
@@ -253,6 +250,41 @@ function load_phy(c, conf, v4_nic_name, v6_nic_name, ring_buffer_size)
 
    link_source(c, v4_nic_name..'.'..v4_info.tx, v6_nic_name..'.'..v6_info.tx)
    link_sink(c,   v4_nic_name..'.'..v4_info.rx, v6_nic_name..'.'..v6_info.rx)
+end
+
+function load_on_a_stick_kernel_iface (c, conf, args)
+   local RawSocket = require("apps.socket.raw").RawSocket
+   local iface, id, queue = lwutil.parse_instance(conf)
+   local device = {tx = 'tx', rx = 'rx'}
+
+   lwaftr_app(c, conf, iface)
+
+   local v4_nic_name, v6_nic_name = args.v4_nic_name, args.v6_nic_name
+   local v4v6, mirror = args.v4v6, args.mirror
+
+   if v4v6 then
+      assert(queue.external_interface.vlan_tag == queue.internal_interface.vlan_tag)
+      config.app(c, 'nic', RawSocket, iface)
+      if mirror then
+         local Tap = require("apps.tap.tap").Tap
+         config.app(c, 'mirror', Tap, {name=mirror})
+         config.app(c, v4v6, V4V6, {mirror=true})
+         config.link(c, v4v6..'.mirror -> mirror.input')
+      else
+         config.app(c, v4v6, V4V6)
+      end
+      config.link(c, 'nic.'..device.tx..' -> '..v4v6..'.input')
+      config.link(c, v4v6..'.output -> nic.'..device.rx)
+
+      link_source(c, v4v6..'.v4', v4v6..'.v6')
+      link_sink(c, v4v6..'.v4', v4v6..'.v6')
+   else
+      config.app(c, v4_nic_name, RawSocket, iface)
+      config.app(c, v6_nic_name, RawSocket, iface)
+
+      link_source(c, v4_nic_name..'.'..device.tx, v6_nic_name..'.'..device.tx)
+      link_sink(c,   v4_nic_name..'.'..device.rx, v6_nic_name..'.'..device.rx)
+   end
 end
 
 function load_on_a_stick(c, conf, args)
@@ -587,7 +619,24 @@ local function compute_worker_configs(conf)
 end
 
 function ptree_manager(f, conf, manager_opts)
+   -- Claim the name if one is defined.
+   local function switch_names(config)
+      local currentname = engine.program_name
+      local name = config.softwire_config.name
+      -- Don't do anything if the name isn't set.
+      if name == nil then
+         return
+      end
+      local success, err = pcall(engine.claim_name, name)
+      if success == false then
+         -- Restore the previous name.
+         config.softwire_config.name = currentname
+         assert(success, err)
+      end
+   end
+
    local function setup_fn(conf)
+      switch_names(conf)
       local worker_app_graphs = {}
       for worker_id, worker_config in pairs(compute_worker_configs(conf)) do
          local app_graph = config.new()
