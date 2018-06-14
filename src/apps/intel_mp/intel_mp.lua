@@ -449,6 +449,28 @@ function Intel:new (conf)
    self.ingress_packet_rate_alarm = CallbackAlarm.new(ingress_packet_rate,
       1, 2e6, function() return self:rxpackets() end)
 
+
+   if self.master then
+      alarms.add_to_inventory {
+         [{alarm_type_id='phy-down'}] = {
+            resource=self.pciaddress,
+            has_clear=true,
+            description='Interface is down',
+         }
+      }
+      local phy_down_state = alarms.declare_alarm {
+         [{resource=self.pciaddress,alarm_type_id='phy-down'}] = {
+            perceived_severity='major',
+            alarm_text='Interface is down',
+         }
+      }
+      self.phy_down_state_alarm = CallbackAlarm.new(phy_down_state,
+         1, 0, function()
+            -- Alarm is not active when link is active
+            return not self:link_status() and 1 or 0
+         end)
+   end
+
    return self
 end
 
@@ -692,6 +714,11 @@ function Intel:pull ()
    -- Sync device statistics if we are master.
    if self.run_stats and self.sync_timer() then
       self:sync_stats()
+   end
+
+   if self.master then
+      -- TODO: Call only when necessary
+      self.phy_down_state_alarm:check()
    end
 end
 

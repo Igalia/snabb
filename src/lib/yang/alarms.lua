@@ -43,6 +43,10 @@ function notifications ()
    local ret = {}
    local notifications = state.notifications
    for k,v in pairs(notifications.alarm) do
+      -- TODO: Improve JSON encode / decode to support nested tables
+      if type(v.alt_resource) == 'table' then
+         v.alt_resource = table.concat(v.alt_resource, ',')
+      end
       table.insert(ret, v)
    end
    for k,v in pairs(notifications.alarm_inventory_changed) do
@@ -355,11 +359,20 @@ end
 -- status change is added to the alarm.
 local function new_alarm (key, args)
    local ret = assert(alarm_list:retrieve(key, args), 'Not supported alarm')
+
+   local alt_resource = args.alt_resource or ret.alt_resource or {}
+   assert(type(alt_resource) == "table")
+
    local status = {
       time = format_date_as_iso_8601(),
       perceived_severity = args.perceived_severity or ret.perceived_severity,
       alarm_text = args.alarm_text or ret.alarm_text,
+      resource      = key.resource,
+      alarm_type_id = key.alarm_type_id,
+      alarm_type_qualifier = key.alarm_type_qualifier,
+      alt_resource = alt_resource,
    }
+
    add_status_change(key, ret, status)
    ret.last_changed = assert(status.time)
    ret.time_created = assert(ret.last_changed)
@@ -396,10 +409,17 @@ end
 -- flag.
 local function update_alarm (key, alarm, args)
    if needs_status_change(alarm, args) then
+      local alt_resource = args.alt_resource or alarm.alt_resource or {}
+      assert(type(alt_resource) == "table")
+
       local status = {
          time = assert(format_date_as_iso_8601()),
          perceived_severity = assert(args.perceived_severity or alarm.perceived_severity),
          alarm_text = assert(args.alarm_text or alarm.alarm_text),
+         resource      = key.resource,
+         alarm_type_id = key.alarm_type_id,
+         alarm_type_qualifier = key.alarm_type_qualifier,
+         alt_resource = alt_resource,
       }
       add_status_change(key, alarm, status)
       alarm.is_cleared = args.is_cleared
@@ -736,6 +756,7 @@ function selftest ()
    do_add_to_inventory({alarm_type_id='arp-resolution'}, {
       resource='nic-v4',
       has_clear=true,
+      alt_resource={'nic-v4-2'},
       description='Raise up if ARP app cannot resolve IP address',
    })
    do_declare_alarm({resource='nic-v4', alarm_type_id='arp-resolution'}, {
