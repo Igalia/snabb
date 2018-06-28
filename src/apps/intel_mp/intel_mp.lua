@@ -1278,21 +1278,30 @@ function Intel82599:rxdmapackets ()
 end
 
 function Intel82599:init_queue_stats (frame)
-   local perqregs = {
-      rxdrops = "QPRDC",
-      rxpackets = "QPRC",
-      txpackets = "QPTC",
-      rxbytes = "QBRC64",
-      txbytes = "QBTC64",
-   }
    self.queue_stats = {}
-   for i=0,15 do
-      for k,v in pairs(perqregs) do
+   function init_queue_regs (qregs, i)
+      for k,v in pairs(qregs) do
          local name = "q" .. i .. "_" .. k
          table.insert(self.queue_stats, name)
          table.insert(self.queue_stats, self.r[v][i])
          frame[name] = {counter}
       end
+   end
+   local perq_rx_regs = {
+      rxbytes = "QBRC64",
+      rxdrops = "QPRDC",
+      rxpackets = "QPRC",
+   }
+   local perq_tx_regs = {
+      txbytes = "QBTC64",
+      txpackets = "QPTC",
+   }
+   local rx, tx = self.rxcounter, self.txcounter
+   for i=rx or 0,rx or 15 do
+      init_queue_regs(perq_rx_regs, i)
+   end
+   for i=tx or 0,tx or 15 do
+      init_queue_regs(perq_tx_regs, i)
    end
 end
 
