@@ -38,7 +38,6 @@ config.app(c, "nic1p1", intel.Intel,
              macaddr = "12:34:56:78:9a:bc",
              rxq = 0,
              rxcounter = 2,
-             run_stats = true,
              wait_for_link = true })
 
 config.app(c, "nic1p2", intel.Intel,
@@ -49,7 +48,6 @@ config.app(c, "nic1p2", intel.Intel,
              macaddr = "aa:aa:aa:aa:aa:aa",
              rxq = 0,
              rxcounter = 3,
-             run_stats = true,
              wait_for_link = true })
 
 config.app(c, "pcap", pcap.PcapReader, "source2.pcap")
@@ -65,12 +63,16 @@ engine.main({ duration = 1 })
 
 assert(link.stats(engine.app_table.sink.input.input0).rxpackets == 51,
        "wrong number of packets received on pool 0")
-assert(engine.app_table.nic1p0:get_rxstats().packets == 51,
-       "expected get_rxstats and link stats to agree")
+local n1p0_pkts = engine.app_table.nic1p0:get_rxstats().packets
+assert(n1p0_pkts == 51,
+       string.format("expected get_rxstats %d and link stats %d to agree",
+                     tonumber(n1p0_pkts), 51))
 assert(link.stats(engine.app_table.sink.input.input1).rxpackets == 102,
        "wrong number of packets received on pool 1")
-assert(engine.app_table.nic1p1:get_rxstats().packets == 102,
-       "expected get_rxstats and link stats to agree")
+local n1p1_pkts = engine.app_table.nic1p1:get_rxstats().packets
+assert(n1p1_pkts == 102,
+       string.format("expected get_rxstats %d and link stats %d to agree",
+                     tonumber(n1p1_pkts), 102))
 assert(link.stats(engine.app_table.sink.input.input2).rxpackets == 102,
        "wrong number of packets received on pool 2")
 assert(engine.app_table.nic1p2:get_rxstats().packets == 102,

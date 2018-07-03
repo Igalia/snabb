@@ -414,8 +414,13 @@ function Intel:new (conf)
       }
       self:init_queue_stats(frame)
       self.stats = shm.create_frame("pci/"..self.pciaddress, frame)
-      self.sync_timer = lib.throttle(0.01)
+   else
+      -- just want to init self.queue_stats, no other counters
+      local frame = {}
+      self:init_queue_stats(frame)
+      self.stats = shm.create_frame("pci/"..self.pciaddress, frame)
    end
+   self.sync_timer = lib.throttle(0.01)
 
    alarms.add_to_inventory(
       {alarm_type_id='ingress-bandwith'},
@@ -654,7 +659,7 @@ function Intel:push ()
    if self.rxq and self.output.output then return end
 
    -- Sync device statistics.
-   if self.sync_timer and self.sync_timer() then self:sync_stats() end
+   if self.sync_timer() then self:sync_stats() end
 end
 
 function Intel:pull ()
@@ -680,7 +685,7 @@ function Intel:pull ()
    self.r.RDT(band(self.rdt - 1, self.ndesc-1))
 
    -- Sync device statistics.
-   if self.sync_timer and self.sync_timer() then self:sync_stats() end
+   if self.sync_timer() then self:sync_stats() end
 end
 
 function Intel:unlock_sw_sem()
@@ -822,23 +827,11 @@ end
 
 function Intel:sync_stats ()
    local set, stats = counter.set, self.stats
-   local function update_queue_stats (start, last)
-      for idx = start, last, 2 do
-         local name, register = self.queue_stats[idx], self.queue_stats[idx+1]
-         set(stats[name], register())
-      end
-   end
-   local function update_rx_queue_stats (idx)
-      update_queue_stats(idx*10+1, idx*10+6)
-   end
-   local function update_tx_queue_stats (idx)
-      update_queue_stats(idx*10+7, idx*10+10)
-   end
-   set(stats.speed, self:link_speed())
-   set(stats.status, self:link_status() and 1 or 2)
-   set(stats.promisc, self:promisc() and 1 or 2)
-   -- Values only updated by master.
-   if self.master then
+   -- Values only updated by master / run_stats instance
+   if self.run_stats then
+      set(stats.speed, self:link_speed())
+      set(stats.status, self:link_status() and 1 or 2)
+      set(stats.promisc, self:promisc() and 1 or 2)
       set(stats.rxbytes, self:rxbytes())
       set(stats.rxpackets, self:rxpackets())
       set(stats.rxmcast, self:rxmcast())
@@ -853,14 +846,9 @@ function Intel:sync_stats ()
       set(stats.txerrors, self:txerrors())
       set(stats.rxdmapackets, self:rxdmapackets())
    end
-   if self.rxcounter or self.txcounter then
-      update_rx_queue_stats(self.rxcounter or self.txcounter)
-      update_tx_queue_stats(self.txcounter or self.rxcounter)
-   else
-      for idx = 1, #self.queue_stats, 2 do
-         local name, register = self.queue_stats[idx], self.queue_stats[idx+1]
-         set(stats[name], register())
-      end
+   for idx = 1, #self.queue_stats, 2 do
+      local name, register = self.queue_stats[idx], self.queue_stats[idx+1]
+      set(stats[name], register())
    end
 end
 
@@ -1188,21 +1176,33 @@ function Intel1g:rxdmapackets ()
 end
 
 function Intel1g:init_queue_stats (frame)
-   local perqregs = {
+   local perrxqqregs = {
       rxdrops = "RQDPC",
-      txdrops = "TQDPC",
       rxpackets = "PQGPRC",
-      txpackets = "PQGPTC",
       rxbytes = "PQGORC",
-      txbytes = "PQGOTC",
       rxmcast = "PQMPRC"
+   }
+   local pertxqregs = {
+      txdrops = "TQDPC",
+      txpackets = "PQGPTC",
+      txbytes = "PQGOTC",
    }
    self.queue_stats = {}
    for i=0,self.max_q-1 do
-      for k,v in pairs(perqregs) do
+      for k,v in pairs(perrxqregs) do
          local name = "q" .. i .. "_" .. k
-         table.insert(self.queue_stats, name)
-         table.insert(self.queue_stats, self.r[v][i])
+         if i == self.rxq then
+            table.insert(self.queue_stats, name)
+            table.insert(self.queue_stats, self.r[v][i])
+         end
+         frame[name] = {counter}
+      end
+      for k,v in pairs(pertxqregs) do
+         local name = "q" .. i .. "_" .. k
+         if i == self.txq then
+            table.insert(self.queue_stats, name)
+            table.insert(self.queue_stats, self.r[v][i])
+         end
          frame[name] = {counter}
       end
    end
@@ -1296,26 +1296,31 @@ function Intel82599:rxdmapackets ()
 end
 
 function Intel82599:init_queue_stats (frame)
-   local function keys(t)
-      local ret = {}
-      for k,_ in pairs(t) do table.insert(ret, k) end
-      table.sort(ret)
-      return ret
-   end
-   local perqregs = {
+   local perrxqregs = {
       rxdrops = "QPRDC",
       rxpackets = "QPRC",
       rxbytes = "QBRC64",
+   }
+   local pertxqregs = {
       txbytes = "QBTC64",
       txpackets = "QPTC",
    }
    self.queue_stats = {}
    for i=0,15 do
-      for _,k in ipairs(keys(perqregs)) do
-         local v = perqregs[k]
+      for k,v in pairs(perrxqregs) do
          local name = "q" .. i .. "_" .. k
-         table.insert(self.queue_stats, name)
-         table.insert(self.queue_stats, self.r[v][i])
+         if i == self.rxcounter then
+            table.insert(self.queue_stats, name)
+            table.insert(self.queue_stats, self.r[v][i])
+         end
+         frame[name] = {counter}
+      end
+      for k,v in pairs(pertxqregs) do
+         local name = "q" .. i .. "_" .. k
+         if i == self.txcounter then
+            table.insert(self.queue_stats, name)
+            table.insert(self.queue_stats, self.r[v][i])
+         end
          frame[name] = {counter}
       end
    end
@@ -1665,7 +1670,7 @@ end
 -- is in control of the counter registers (and clears them on read)
 function Intel82599:get_rxstats ()
    assert(self.rxcounter and self.rxq, "cannot retrieve rxstats")
-   local frame = shm.open_frame("pci/"..self.pciaddress)
+   local frame = self.stats
    local rxc   = self.rxcounter
    return {
       counter_id = rxc,
@@ -1677,7 +1682,7 @@ end
 
 function Intel82599:get_txstats ()
    assert(self.txcounter and self.txq, "cannot retrieve txstats")
-   local frame = shm.open_frame("pci/"..self.pciaddress)
+   local frame = self.stats
    local txc   = self.txcounter
    return {
       counter_id = txc,

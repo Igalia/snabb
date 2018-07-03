@@ -10,18 +10,25 @@ local C = ffi.C
 function test(pciaddr, qno, vmdq, poolno, macaddr, vlan)
    local c = config.new()
    if vmdq then
+      local rxc
+      if poolno then
+         -- only have 16 counters on 82599, so use 15 if it's too big
+         rxc = math.min(poolno * 4 + qno, 15)
+      end
       config.app(c, "nic", intel.Intel,
                  { pciaddr=pciaddr,
                    macaddr=macaddr,
                    vlan=vlan,
                    vmdq=true,
                    poolnum=poolno,
+                   rxcounter = rxc,
                    rxq = qno,
                    wait_for_link=true })
    else
       config.app(c, "nic", intel.Intel,
                  { pciaddr=pciaddr,
                    rxq = qno,
+                   rxcounter = qno,
                    wait_for_link=true })
    end
    config.app(c, "sink", basic.Sink)
