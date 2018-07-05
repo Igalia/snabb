@@ -234,7 +234,9 @@ function load_phy(c, conf, v4_nic_name, v6_nic_name, ring_buffer_size)
       txq=id,
       poolnum=0,
       vlan=queue.external_interface.vlan_tag,
-      rxcounter=1,
+      rxcounter=id,
+      txcounter=id,
+      run_stats=true,
       ring_buffer_size=ring_buffer_size,
       macaddr=ethernet:ntop(queue.external_interface.mac)})
    config.app(c, v6_nic_name, require(v6_info.driver).driver, {
@@ -244,7 +246,9 @@ function load_phy(c, conf, v4_nic_name, v6_nic_name, ring_buffer_size)
       txq=id,
       poolnum=0,
       vlan=queue.internal_interface.vlan_tag,
-      rxcounter=1,
+      rxcounter=id,
+      txcounter=id,
+      run_stats=true,
       ring_buffer_size=ring_buffer_size,
       macaddr = ethernet:ntop(queue.internal_interface.mac)})
 
@@ -306,6 +310,9 @@ function load_on_a_stick(c, conf, args)
          poolnum=0,
          vlan=queue.external_interface.vlan_tag,
          ring_buffer_size=args.ring_buffer_size,
+         rxcounter = id,
+         txcounter = id,
+         run_stats=true,
          macaddr = ethernet:ntop(queue.external_interface.mac)})
       if mirror then
          local Tap = require("apps.tap.tap").Tap
@@ -324,6 +331,9 @@ function load_on_a_stick(c, conf, args)
       link_source(c, v4v6..'.v4', v4v6..'.v6')
       link_sink(c, v4v6..'.v4', v4v6..'.v6')
    else
+      assert(queue.external_interface.mac ~= queue.internal_interface.mac,
+             "When using different VLAN tags, external and internal MAC "..
+                "addresses must be different too")
       config.app(c, v4_nic_name, driver, {
          pciaddr = pciaddr,
          vmdq=true, -- Needed to enable MAC filtering/stamping.
@@ -332,6 +342,9 @@ function load_on_a_stick(c, conf, args)
          poolnum=0,
          vlan=queue.external_interface.vlan_tag,
          ring_buffer_size=args.ring_buffer_size,
+         rxcounter = id,
+         txcounter = id,
+         run_stats=true,
          macaddr = ethernet:ntop(queue.external_interface.mac)})
       config.app(c, v6_nic_name, driver, {
          pciaddr = pciaddr,
@@ -341,6 +354,9 @@ function load_on_a_stick(c, conf, args)
          poolnum=1,
          vlan=queue.internal_interface.vlan_tag,
          ring_buffer_size=args.ring_buffer_size,
+         rxcounter = id,
+         txcounter = id,
+         run_stats=true,
          macaddr = ethernet:ntop(queue.internal_interface.mac)})
 
       link_source(c, v4_nic_name..'.'..device.tx, v6_nic_name..'.'..device.tx)

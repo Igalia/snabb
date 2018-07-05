@@ -19,7 +19,7 @@ local function parse_command_line(args)
    local handlers = {}
    function handlers.h() show_usage(0) end
    args = lib.dogetopt(args, handlers, "h", {help="h"})
-   if #args ~= 1 then show_usage(1, msg) end
+   if #args ~= 1 then show_usage(1) end
    return unpack(args)
 end
 
@@ -44,9 +44,9 @@ function run(args)
    local function print_notifications()
       local socket = connect(instance_id)
       while true do
-         local obj = json.read_json_object(socket)
+         local obj = json.read_json(socket)
          if obj == nil then return end
-         json.write_json_object(io.stdout, obj)
+         json.write_json(io.stdout, obj)
          io.stdout:write_chars("\n")
          io.stdout:flush_output()
       end

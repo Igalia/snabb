@@ -11,6 +11,7 @@ local file_op = require("lib.fibers.file")
 local op      = require("lib.fibers.op")
 local channel = require("lib.fibers.channel")
 local cond    = require("lib.fibers.cond")
+local sleep   = require("lib.fibers.sleep")
 
 -- Fixed-size part of an inotify event.
 local inotify_event_header_t = ffi.typeof[[
@@ -41,14 +42,8 @@ end
 -- argument an operation that, if performable, will shut down the
 -- channel.
 function inotify_event_channel(file_name, events, cancel_op)
-   local ok, stream = pcall(open_inotify_stream, file_name, events)
+   local stream = open_inotify_stream(file_name, events)
    local ch = channel.new()
-   if not ok then
-      warn('warning: failed to open inotify on %s: %s',
-           file_name, tostring(stream))
-      fiber.spawn(function () ch:put(nil) end)
-      return ch
-   end
    if cancel_op ~= nil then
       cancel_op = cancel_op:wrap(function () return 'cancelled' end)
    end
@@ -71,6 +66,44 @@ function inotify_event_channel(file_name, events, cancel_op)
    return ch
 end
 
+-- The number of inotify watches is limited on a system-wide basis, in
+-- addition to the limit in number of open file descriptors.  Hence we
+-- have this fallback, should we fail to open inotify.
+local function fallback_directory_events(dir, cancel_op)
+   local ch = channel.new()
+   if cancel_op ~= nil then
+      cancel_op = cancel_op:wrap(function () return 'cancelled' end)
+   end
+   local select_op = op.choice(sleep.sleep_op(1), cancel_op)
+   local inventory = {}
+   fiber.spawn(function ()
+      local size = 4096
+      local buf = S.t.buffer(4096)
+      local now = 0
+      while select_op:perform() ~= 'cancelled' do
+         local iter, err = S.util.ls(dir, buf, size)
+         if not iter then break end
+         now = now + 1
+         for f in iter do
+            if f ~= '.' and f ~= '..' then
+               if not inventory[f] then
+                  ch:put({mask=S.c.IN.create, name=f})
+               end
+               inventory[f] = now
+            end
+         end
+         for f,t in pairs(inventory) do
+            if t < now then
+               inventory[f] = nil
+               ch:put({mask=S.c.IN.delete, name=f})
+            end
+         end
+      end
+      ch:put(nil)
+   end)
+   return ch
+end
+
 -- Return a channel on which to receive events like {kind=add,
 -- name=NAME} or {kind=remove, name=NAME}.  Will begin by emitting an
 -- "mkdir" event for the directory being monitored, then "add" events
@@ -85,7 +118,10 @@ function directory_inventory_events(dir, cancel_op)
    local flags = events..','..watch_flags
    local cancel = cond.new()
    cancel_op = op.choice(cancel:wait_operation(), cancel_op)
-   local rx = inotify_event_channel(dir, flags, cancel_op)
+   local inotify_ok, rx = pcall(inotify_event_channel, dir, flags, cancel_op)
+   if not inotify_ok then
+      rx = fallback_directory_events(dir, cancel_op)
+   end
    local tx = channel.new()
    local inventory = {}
    for _,name in ipairs(S.util.dirtable(dir) or {}) do
@@ -147,7 +183,9 @@ function recursive_directory_inventory_events(dir, cancel_op)
          return op.choice(unpack(ops))
       end
       local rx_op = recompute_rx_op()
-      while true do
+      local occupancy = 0
+      local stopping = false
+      while not (stopping and occupancy == 0) do
          local event = rx_op:perform()
          if event == nil then
             -- Just pass.  Seems the two remove notifications have raced
@@ -166,9 +204,11 @@ function recursive_directory_inventory_events(dir, cancel_op)
                   warn('unexpected double-add for %s', name)
                end
             else
+               occupancy = occupancy + 1
                tx:put({kind='creat', name=event.name})
             end
          elseif event.kind == 'mkdir' then
+            occupancy = occupancy + 1
             tx:put(event)
          elseif event.kind == 'remove' then
             local name = event.name
@@ -177,23 +217,32 @@ function recursive_directory_inventory_events(dir, cancel_op)
                -- send rmdir.
                subdirs[name].cancel:signal()
             else
+               occupancy = occupancy - 1
                tx:put({kind='rm', name=name})
             end
          elseif event.kind == 'rmdir' then
-            tx:put(event)
+            occupancy = occupancy - 1
             local name = event.name
             if name == dir then
-               break
-            elseif subdirs[name] then
-               subdirs[name] = nil
-               rx_op = recompute_rx_op()
+               stopping = true
+            else
+               tx:put(event)
+               if subdirs[name] then
+                  subdirs[name] = nil
+                  rx_op = recompute_rx_op()
+               end
             end
-         elseif event.kind == 'creat' or event.kind == 'rm' then
+         elseif event.kind == 'creat' then
+            occupancy = occupancy + 1
+            tx:put(event)
+         elseif event.kind == 'rm' then
+            occupancy = occupancy - 1
             tx:put(event)
          else
             warn('unexpected event kind on %s: %s', event.name, event.kind)
          end
       end
+      tx:put({kind='rmdir', name=dir})
       tx:put(nil)
    end)
    return tx

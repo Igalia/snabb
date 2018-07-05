@@ -65,22 +65,22 @@ end
 
 function Stream:flush_some_output()
    assert(not self.tx:is_empty())
-   while true do
-      local buf, count = self.tx:peek()
-      local did_write = self.io:write(buf, count)
-      if did_write then
-         self.tx:advance_read(did_write)
-         if self.tx:is_empty() then self.tx:reset() end
-         return
-      else
-         self.io:wait_for_writable()
-      end
+   local buf, count = self.tx:peek()
+   local did_write = self.io:write(buf, count)
+   if did_write then
+      self.tx:advance_read(did_write)
+      if self.tx:is_empty() then self.tx:reset() end
+   else
+      self.io:wait_for_writable()
+      return self:flush_some_output()
    end
 end
 
 function Stream:flush_output()
    if not self.tx then return end
-   while not self.tx:is_empty() do self:flush_some_output() end
+   if self.tx:is_empty() then return end
+   self:flush_some_output()
+   if not self.tx:is_empty() then return self:flush_output() end
 end
 
 Stream.flush = Stream.flush_output
@@ -109,7 +109,11 @@ end
 -- COUNT if the stream reaches EOF beforehand.
 function Stream:read_bytes(buf, count)
    buf = ffi.cast('uint8_t*', buf)
-   local offset = 0
+   -- Unrolled fast-path to avoid nested loops.
+   local did_read = self:read_some_bytes(buf, count)
+   if did_read == count then return count end
+   if did_read == 0 then return 0 end
+   local offset = did_read
    while offset < count do
       local did_read = self:read_some_bytes(buf + offset, count - offset)
       if did_read == 0 then break end
@@ -144,8 +148,18 @@ function Stream:read_struct(buf, type)
    return buf
 end
 
+local array_types = {}
+local function get_array_type(t)
+   local at = array_types[t]
+   if not at then
+      at = ffi.typeof('$[?]', t)
+      array_types[t] = at
+   end
+   return at
+end
+
 function Stream:read_array(buf, type, count)
-   if buf == nil then buf = ffi.typeof('$[?]', type)(count) end
+   if buf == nil then buf = get_array_type(type)(count) end
    self:read_bytes_or_error(buf, ffi.sizeof(type) * count)
    return buf
 end
@@ -209,24 +223,23 @@ end
 function Stream:write_bytes(buf, count)
    if self.tx:read_avail() == 0 then self:flush_input() end
    buf = ffi.cast('uint8_t*', buf)
-   while count > 0 do
-      if count >= self.tx.size then
-         -- Write directly.
-         self:flush_output()
-         local did_write = self.io:write(buf, count)
-         if did_write then
-            buf, count = buf + did_write, count - did_write
-         else
-            self.io:wait_for_writable()
-         end
+   if count >= self.tx.size then
+      -- Write directly.
+      self:flush_output()
+      local did_write = self.io:write(buf, count)
+      if did_write then
+         buf, count = buf + did_write, count - did_write
       else
-         -- Write via buffer.
-         local to_put = math.min(self.tx:write_avail(), count)
-         self.tx:write(buf, to_put)
-         buf, count = buf + to_put, count - to_put
-         if self.tx:is_full() then self:flush_some_output() end
+         self.io:wait_for_writable()
       end
+   else
+      -- Write via buffer.
+      local to_put = math.min(self.tx:write_avail(), count)
+      self.tx:write(buf, to_put)
+      buf, count = buf + to_put, count - to_put
+      if self.tx:is_full() then self:flush_some_output() end
    end
+   if count > 0 then return self:write_bytes(buf, count) end
 end
 
 function Stream:write_chars(str)
@@ -246,7 +259,8 @@ function Stream:write_array(type, ptr, count)
 end
 
 function Stream:write_scalar(type, value)
-   local ptr = ffi.typeof('$[1]', type)(value)
+   local ptr = get_array_type(type)(1)
+   ptr[0] = value
    assert(ptr[0] == value, "value out of range")
    self:write_array(type, ptr, 1)
 end
