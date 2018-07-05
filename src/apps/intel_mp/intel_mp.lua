@@ -417,35 +417,25 @@ function Intel:new (conf)
       self.sync_timer = lib.throttle(0.01)
    end
 
-   alarms.add_to_inventory {
-      [{alarm_type_id='ingress-bandwith'}] = {
-         resource=tostring(S.getpid()),
-         has_clear=true,
-         description='Ingress bandwith exceeds N Gbps',
-      }
-   }
-   local ingress_bandwith = alarms.declare_alarm {
-      [{resource=tostring(S.getpid()),alarm_type_id='ingress-bandwith'}] = {
-         perceived_severity='major',
-         alarm_text='Ingress bandwith exceeds 1e9 bytes/s which can cause packet drops.'
-      }
-   }
+   alarms.add_to_inventory(
+      {alarm_type_id='ingress-bandwith'},
+      {resource=tostring(S.getpid()), has_clear=true,
+       description='Ingress bandwith exceeds N Gbps'})
+   local ingress_bandwith = alarms.declare_alarm(
+      {resource=tostring(S.getpid()),alarm_type_id='ingress-bandwith'},
+      {perceived_severity='major',
+       alarm_text='Ingress bandwith exceeds 1e9 bytes/s which can cause packet drops.'})
    self.ingress_bandwith_alarm = CallbackAlarm.new(ingress_bandwith,
       1, 1e9, function() return self:rxbytes() end)
 
-   alarms.add_to_inventory {
-      [{alarm_type_id='ingress-packet-rate'}] = {
-         resource=tostring(S.getpid()),
-         has_clear=true,
-         description='Ingress packet-rate exceeds N Gbps',
-      }
-   }
-   local ingress_packet_rate = alarms.declare_alarm {
-      [{resource=tostring(S.getpid()),alarm_type_id='ingress-packet-rate'}] = {
-         perceived_severity='major',
-         alarm_text='Ingress packet-rate exceeds 2MPPS which can cause packet drops.'
-      }
-   }
+   alarms.add_to_inventory(
+      {alarm_type_id='ingress-packet-rate'},
+      {resource=tostring(S.getpid()), has_clear=true,
+       description='Ingress packet-rate exceeds N Gbps'})
+   local ingress_packet_rate = alarms.declare_alarm(
+      {resource=tostring(S.getpid()),alarm_type_id='ingress-packet-rate'},
+      {perceived_severity='major',
+       alarm_text='Ingress packet-rate exceeds 2MPPS which can cause packet drops.'})
    self.ingress_packet_rate_alarm = CallbackAlarm.new(ingress_packet_rate,
       1, 2e6, function() return self:rxpackets() end)
 
@@ -662,9 +652,9 @@ function Intel:push ()
    -- same code as in pull, but we only call it in case the rxq
    -- is disabled for this app
    if self.rxq and self.output.output then return end
-   if self.run_stats and self.sync_timer() then
-      self:sync_stats()
-   end
+
+   -- Sync device statistics.
+   if self.sync_timer and self.sync_timer() then self:sync_stats() end
 end
 
 function Intel:pull ()
@@ -689,10 +679,8 @@ function Intel:pull ()
    -- This avoids RDT == RDH when every descriptor is available.
    self.r.RDT(band(self.rdt - 1, self.ndesc-1))
 
-   -- Sync device statistics if we are master.
-   if self.run_stats and self.sync_timer() then
-      self:sync_stats()
-   end
+   -- Sync device statistics.
+   if self.sync_timer and self.sync_timer() then self:sync_stats() end
 end
 
 function Intel:unlock_sw_sem()
@@ -834,25 +822,45 @@ end
 
 function Intel:sync_stats ()
    local set, stats = counter.set, self.stats
+   local function update_queue_stats (start, last)
+      for idx = start, last, 2 do
+         local name, register = self.queue_stats[idx], self.queue_stats[idx+1]
+         set(stats[name], register())
+      end
+   end
+   local function update_rx_queue_stats (idx)
+      update_queue_stats(idx*10+1, idx*10+6)
+   end
+   local function update_tx_queue_stats (idx)
+      update_queue_stats(idx*10+7, idx*10+10)
+   end
    set(stats.speed, self:link_speed())
    set(stats.status, self:link_status() and 1 or 2)
    set(stats.promisc, self:promisc() and 1 or 2)
-   set(stats.rxbytes, self:rxbytes())
-   set(stats.rxpackets, self:rxpackets())
-   set(stats.rxmcast, self:rxmcast())
-   set(stats.rxbcast, self:rxbcast())
-   set(stats.rxdrop, self:rxdrop())
-   set(stats.rxerrors, self:rxerrors())
-   set(stats.txbytes, self:txbytes())
-   set(stats.txpackets, self:txpackets())
-   set(stats.txmcast, self:txmcast())
-   set(stats.txbcast, self:txbcast())
-   set(stats.txdrop, self:txdrop())
-   set(stats.txerrors, self:txerrors())
-   set(stats.rxdmapackets, self:rxdmapackets())
-   for idx = 1, #self.queue_stats, 2 do
-      local name, register = self.queue_stats[idx], self.queue_stats[idx+1]
-      set(stats[name], register())
+   -- Values only updated by master.
+   if self.master then
+      set(stats.rxbytes, self:rxbytes())
+      set(stats.rxpackets, self:rxpackets())
+      set(stats.rxmcast, self:rxmcast())
+      set(stats.rxbcast, self:rxbcast())
+      set(stats.rxdrop, self:rxdrop())
+      set(stats.rxerrors, self:rxerrors())
+      set(stats.txbytes, self:txbytes())
+      set(stats.txpackets, self:txpackets())
+      set(stats.txmcast, self:txmcast())
+      set(stats.txbcast, self:txbcast())
+      set(stats.txdrop, self:txdrop())
+      set(stats.txerrors, self:txerrors())
+      set(stats.rxdmapackets, self:rxdmapackets())
+   end
+   if self.rxcounter or self.txcounter then
+      update_rx_queue_stats(self.rxcounter or self.txcounter)
+      update_tx_queue_stats(self.txcounter or self.rxcounter)
+   else
+      for idx = 1, #self.queue_stats, 2 do
+         local name, register = self.queue_stats[idx], self.queue_stats[idx+1]
+         set(stats[name], register())
+      end
    end
 end
 
@@ -1288,16 +1296,23 @@ function Intel82599:rxdmapackets ()
 end
 
 function Intel82599:init_queue_stats (frame)
+   local function keys(t)
+      local ret = {}
+      for k,_ in pairs(t) do table.insert(ret, k) end
+      table.sort(ret)
+      return ret
+   end
    local perqregs = {
       rxdrops = "QPRDC",
       rxpackets = "QPRC",
-      txpackets = "QPTC",
       rxbytes = "QBRC64",
       txbytes = "QBTC64",
+      txpackets = "QPTC",
    }
    self.queue_stats = {}
    for i=0,15 do
-      for k,v in pairs(perqregs) do
+      for _,k in ipairs(keys(perqregs)) do
+         local v = perqregs[k]
          local name = "q" .. i .. "_" .. k
          table.insert(self.queue_stats, name)
          table.insert(self.queue_stats, self.r[v][i])

@@ -10,22 +10,26 @@ local shm = require("core.shm")
 local counter = require("core.counter")
 local histogram = require("core.histogram")
 local usage = require("program.top.README_inc")
+local ethernet = require("lib.protocol.ethernet")
 local file = require("lib.stream.file")
 local fiber = require("lib.fibers.fiber")
 local sleep = require("lib.fibers.sleep")
-local inotify = require("lib.ptree.inotify")
 local op = require("lib.fibers.op")
 local cond = require("lib.fibers.cond")
 local channel = require("lib.fibers.channel")
+local inotify = require("lib.ptree.inotify")
+local rrd = require("lib.rrd")
 
 -- First, the global state for the app.
 --
-local snabb_state = { instances={}, counters={}, histograms={} }
+local snabb_state = { instances={}, counters={}, histograms={}, rrds={} }
 local ui = {
+   view='interface',
+   sample_time=nil, sample=nil, prev_sample_time=nil, prev_sample=nil,
    tree=nil, focus=nil, wake=cond.new(), rows=24, cols=80,
    show_empty=false, show_rates=true,
    show_links=true, show_apps=true, show_engine=true,
-   paused=false }
+   pause_time=nil }
 
 local function needs_redisplay(keep_tree)
    if not keep_tree then ui.tree = nil end
@@ -59,7 +63,7 @@ local function instance_monitor()
             local dirname, basename = dirsplit(event.name)
             if dirname == shm.root then
                local pid = tonumber(basename)
-               if pid and is_dir(event.name) and not by_pid[pid] then
+               if pid and is_dir(event.name) and not by_pid[pid] and pid ~= S.getpid() then
                   by_pid[pid] = {name=nil}
                   tx:put({kind="new-instance", pid=pid})
                end
@@ -97,7 +101,7 @@ local function instance_monitor()
    return tx
 end
 
-local function monitor_snabb_instance(pid, instance, counters, histograms)
+local function monitor_snabb_instance(pid, instance, counters, histograms, rrds)
    local dir = shm.root..'/'..pid
    local rx = inotify.recursive_directory_inventory_events(dir)
    fiber.spawn(function ()
@@ -135,6 +139,16 @@ local function monitor_snabb_instance(pid, instance, counters, histograms)
                histograms[name] = nil
                needs_redisplay()
             end
+         elseif event.name:match('%.rrd') then
+            local name = event.name:sub(#dir + 2):match('^(.*)%.rrd')
+            if event.kind == 'creat' then
+               local ok, r = pcall(rrd.open_file, event.name)
+               if ok then rrds[name] = r end
+               needs_redisplay()
+            elseif event.kind == 'rm' then
+               rrds[name] = nil
+               needs_redisplay()
+            end
          end
       end
    end)
@@ -145,16 +159,17 @@ local function update_snabb_state()
    local pending = {}
    local instances = snabb_state.instances
    local counters, histograms = snabb_state.counters, snabb_state.histograms
+   local rrds = snabb_state.rrds
    for event in rx.get, rx do
       local kind, name, pid = event.kind, event.name, event.pid
       if kind == 'new-instance' then
          instances[pid], pending[pid] = { name = pending[pid] }, nil
-         counters[pid], histograms[pid] = {}, {}
+         counters[pid], histograms[pid], rrds[pid] = {}, {}, {}
          monitor_snabb_instance(pid, instances[pid], counters[pid],
-                                histograms[pid])
+                                histograms[pid], rrds[pid])
       elseif kind == 'instance-gone' then
          instances[pid], pending[pid] = nil, nil
-         counters[pid], histograms[pid] = nil, nil
+         counters[pid], histograms[pid], rrds[pid] = nil, nil, nil
          if ui.focus == pid then ui.focus = nil end
       elseif kind == 'new-name' then
          if instances[pid] then instances[pid].name = name
@@ -316,8 +331,14 @@ local function summarize_histogram(histogram, prev)
    return min * 1e6, avg * 1e6, max * 1e6
 end
 
+local leaf_mt = {}
+local function make_leaf(value, rrd)
+   return setmetatable({value=value, rrd=rrd}, leaf_mt)
+end
+local function is_leaf(x) return getmetatable(x) == leaf_mt end
+
 local function compute_histograms_tree(histograms)
-   if histograms == nil then return nil end
+   if histograms == nil then return {} end
    local ret = {}
    for k,v in pairs(histograms) do
       local branches, leaf = dirsplit(k)
@@ -326,13 +347,13 @@ local function compute_histograms_tree(histograms)
          if parent[branch] == nil then parent[branch] = {} end
          parent = parent[branch]
       end
-      parent[leaf] = function() return v:snapshot() end
+      parent[leaf] = make_leaf(function() return v:snapshot() end)
    end
    return ret
 end
 
-local function compute_counters_tree(counters)
-   if counters == nil then return nil end
+local function compute_counters_tree(counters, rrds)
+   if counters == nil then return {} end
    local ret = {}
    for k,v in pairs(counters) do
       local branches, leaf = dirsplit(k)
@@ -342,7 +363,8 @@ local function compute_counters_tree(counters)
             if parent[branch] == nil then parent[branch] = {} end
             parent = parent[branch]
          end
-         parent[leaf] = function() return counter.read(v) end
+         parent[leaf] = make_leaf(
+            function() return counter.read(v) end, rrds[k])
       end
    end
    -- The rxpackets and rxbytes link counters are redundant.
@@ -361,8 +383,8 @@ end
 local function adjoin(t, k, v)
    if t[k] == nil then t[k] = v; return end
    if t[k] == v then return end
-   assert(type(t[k]) == 'table')
-   assert(type(v) == 'table')
+   assert(type(t[k]) == 'table' and not is_leaf(t[k]))
+   assert(type(v) == 'table' and not is_leaf(v))
    for vk, vv in pairs(v) do adjoin(t[k], vk, vv) end
 end
 
@@ -389,27 +411,20 @@ local function compute_tree()
          parent_node.workers[pid] = node
       end
       node.pid = pid
-      if ui.focus == nil or ui.focus == pid then
-         for k,v in pairs(compute_histograms_tree(snabb_state.histograms[pid])) do
-            adjoin(node, k, v)
-         end
-         for k,v in pairs(compute_counters_tree(snabb_state.counters[pid])) do
-            adjoin(node, k, v)
-         end
+      for k,v in pairs(compute_histograms_tree(snabb_state.histograms[pid])) do
+         adjoin(node, k, v)
+      end
+         for k,v in pairs(compute_counters_tree(snabb_state.counters[pid],
+                                                snabb_state.rrds[pid] or {})) do
+         adjoin(node, k, v)
       end
    end
    return root
 end
 
-local function isempty(x)
-   for k,v in pairs(x) do return false end
-   return true
-end
-
-local function maybe_hide(tab, ...)
-   for _,k in ipairs{...} do
-      if tab[k] and not ui['show_'..k] then tab[k] = nil end
-   end
+local function nil_if_empty(x)
+   for k,v in pairs(x) do return x end
+   return nil
 end
 
 -- The ui.tree just represents the structure of the state.  Before we go
@@ -419,76 +434,281 @@ end
 local function sample_tree(tree)
    local ret = {}
    for k,v in pairs(tree) do
-      if type(v) == 'function' then v = v() end
-      if type(v) == 'table' then ret[k] = sample_tree(v)
-      elseif not ui.show_empty and tonumber(v) == 0 then
-         -- Pass.
-      else
-         ret[k] = v
-      end
+      if is_leaf(v) then v = make_leaf(v.value(), v.rrd)
+      elseif type(v) == 'table' then v = sample_tree(v) end
+      ret[k] = v
    end
-   maybe_hide(ret, 'apps', 'links', 'engine')
-   if isempty(ret) then return end
+   return nil_if_empty(ret)
+end
+
+local function prune_sample(tree)
+   local function prune(name, tree)
+      if name == 'apps' and not ui.show_apps then return nil end
+      if name == 'links' and not ui.show_links then return nil end
+      if name == 'engine' and not ui.show_engine then return nil end
+      if is_leaf(tree) then
+         if not ui.show_empty and tonumber(tree.value) == 0 then return nil end
+      elseif type(tree) == 'table' then
+         local ret = {}
+         for k,v in pairs(tree) do ret[k] = prune(k, v) end
+         return nil_if_empty(ret)
+      end
+      return tree
+   end
+   local function prune_instance(instance)
+      local ret = {}
+      if instance.workers then
+         ret.workers = {}
+         for k,v in pairs(instance.workers) do
+            ret.workers[k] = prune_instance(v)
+         end
+         ret.workers = nil_if_empty(ret.workers)
+      end
+      if ui.focus == nil or ui.focus == instance.pid then
+         for k,v in pairs(instance) do
+            if k ~= 'workers' then ret[k] = prune(k, v) end
+         end
+      end
+      return nil_if_empty(ret)
+   end
+   local ret = {}
+   for k,v in pairs(tree) do ret[k] = prune_instance(v) end
    return ret
 end
 
+local function compute_rate(v, prev, rrd, t, dt)
+   if ui.pause_time and t ~= ui.pause_time then
+      if not rrd then return 0 end
+      for name,source in pairs(rrd:ref(ui.pause_time)) do
+         for _,reading in ipairs(source.cf.average) do
+            return reading.value
+         end
+      end
+      return 0/0
+   elseif prev then
+      return tonumber(v - prev)/dt
+   else
+      return 0/0
+   end
+end
+
+local function scale(x)
+   x=tonumber(x)
+   for _,scale in ipairs {{'T', 1e12}, {'G', 1e9}, {'M', 1e6}, {'k', 1e3}} do
+      local tag, base = unpack(scale)
+      if x > base then return x/base, tag end
+   end
+   return x, ''
+end
+
+local compute_display_tree = {}
+
+local macaddr_string
+do
+   local buf = ffi.new('union { uint64_t u64; uint8_t bytes[6]; }')
+   function macaddr_string(n)
+      -- The app read out the address and wrote it to the counter as a
+      -- uint64, just as if it aliased the address.  So, to get the
+      -- right byte sequence, we can do the same, without swapping.
+      buf.u64 = n
+      return ethernet:ntop(buf.bytes)
+   end
+end
+
 -- The state renders to a nested display tree, consisting of "group",
--- "rows", "columns", and "chars" elements.
-local function compute_display_tree(tree, prev, dt)
-   local ret = {kind='rows', contents={}}
-   for k, v in sortedpairs(tree) do
-      if type(v) ~= 'table' then
-         local prev = prev and type(prev[k]) == type(v) and prev[k]
-         if type(v) == 'cdata' and tonumber(v) then
-            if ui.show_rates and prev and tonumber(v) ~= tonumber(prev) then
+-- "rows", "grid", and "chars" elements.
+function compute_display_tree.tree(tree, prev, dt, t)
+   local function chars(align, fmt, ...)
+      return {kind='chars', align=align, contents=fmt:format(...)}
+   end
+   local function lchars(fmt, ...) return chars('left', fmt, ...) end
+   tree = prune_sample(tree)
+   local function visit(tree, prev)
+      local ret = {kind='rows', contents={}}
+      for k, v in sortedpairs(tree) do
+         local prev = prev and prev[k]
+         local rrd
+         if is_leaf(v) then
+            v, rrd = v.value, v.rrd
+            if is_leaf(prev) then prev = prev.value else prev = nil end
+         elseif type(v) ~= type(prev) then
+            prev = nil
+         end
+         if type(v) ~= 'table' then
+            local out
+            if type(v) == 'cdata' and tonumber(v) then
+               local units
                if k:match('packets') then units = 'PPS'
                elseif k:match('bytes') then units = 'bytes/s'
-               elseif k:match('bits') then units = 'bits/s'
-               else units = 'per second' end
-               local rate = math.floor(tonumber(v-prev)/dt)
-               str = string.format("%s: %s %s", k, lib.comma_value(rate), units)
+               elseif k:match('bits') then units = 'bps'
+               elseif k:match('breath') then units = 'breaths/s'
+               elseif k:match('drop') then units = 'PPS'
+               end
+               local show_rates = units or tonumber(v) ~= tonumber(prev)
+               show_rates = show_rates and ui.show_rates
+               show_rates = show_rates or (ui.pause_time and ui.pause_time ~= t)
+               if show_rates then
+                  local rate = compute_rate(v, prev, rrd, t, dt)
+                  local v, tag = scale(rate)
+                  out = lchars("%s: %.3f %s%s", k, v, tag, units or "/sec")
+               elseif k == 'macaddr' then
+                  out = lchars("%s: %s", k, macaddr_string(v))
+               else
+                  out = lchars("%s: %s", k, lib.comma_value(v))
+               end
+            elseif type(v) == 'cdata' then
+               -- Hackily, assume that the value is a histogram.
+               out = lchars('%s: %.2f min, %.2f avg, %.2f max',
+                            k, summarize_histogram(v, prev))
             else
-               str = string.format("%s: %s", k, lib.comma_value(v))
+               out = lchars("%s: %s", k, tostring(v))
             end
-         elseif type(v) == 'cdata' then
-            -- Hackily, assume that the value is a histogram.
-            str = string.format('%s: %.2f min, %.2f avg, %.2f max',
-                                k, summarize_histogram(v, prev))
-         else
-            str = string.format("%s: %s", k, tostring(v))
+            table.insert(ret.contents, out)
          end
-         table.insert(ret.contents, {kind='chars', contents=str})
+      end
+      for k, v in sortedpairs(tree) do
+         if type(v) == 'table' and not is_leaf(v) then
+            local has_prev = prev and type(prev[k]) == type(v)
+            local rows = visit(v, has_prev and prev[k])
+            table.insert(ret.contents, {kind='group', label=k, contents=rows})
+         end
+      end
+      return ret
+   end
+   return {kind='rows',
+           contents={lchars('snabb top: %s',
+                            os.date('%Y-%m-%d %H:%M:%S', ui.pause_time or t)),
+                     lchars('----'),
+                     visit(tree, prev)}}
+end
+
+function compute_display_tree.interface(tree, prev, dt, t)
+   local function chars(align, fmt, ...)
+      return {kind='chars', align=align, contents=fmt:format(...)}
+   end
+   local function lchars(fmt, ...) return chars('left', fmt, ...) end
+   local function cchars(fmt, ...) return chars('center', fmt, ...) end
+   local function rchars(fmt, ...) return chars('right', fmt, ...) end
+   local grid = {}
+   local rows = {
+      kind='rows',
+      contents = {
+         lchars('snabb top: %s',
+                os.date('%Y-%m-%d %H:%M:%S', ui.pause_time or t)),
+         lchars('----'),
+         {kind='grid', width=6, shrink={true,true}, contents=grid}
+   }}
+   local function gridrow(...) table.insert(grid, {...}) end
+   --  name or \---, pid, breaths/s, latency
+   --            \-  pci device, macaddr, mtu, speed
+   --                  RX:       PPS, bps, %, [drops/s]
+   --                  TX:       PPS, bps, %, [drops/s]
+   local function rate(key, counters, prev)
+      if not counters then return 0/0 end
+      if not counters[key] then return 0/0 end
+      local v, rrd = counters[key], nil
+      prev = prev and prev[key]
+      if is_leaf(v) then
+         v, rrd, prev = v.value, v.rrd, is_leaf(prev) and prev.value or nil
+      end
+      return compute_rate(v, prev, rrd, t, dt)
+   end
+   local function show_traffic(tag, pci, prev)
+      local pps = rate(tag..'packets', pci, prev)
+      local bytes = rate(tag..'bytes', pci, prev)
+      local drops = rate(tag..'drop', pci, prev)
+      -- 7 bytes preamble, 1 start-of-frame, 4 CRC, 12 interframe gap.
+      local overhead = (7 + 1 + 4 + 12) * pps
+      local bps = (bytes + overhead) * 8
+      local max = tonumber(pci.speed and pci.speed.value) or 0
+      gridrow(nil,
+              rchars('%s:', tag:upper()),
+              lchars('%.3f %sPPS', scale(pps)),
+              lchars('%.3f %sbps', scale(bps)),
+              lchars('%.2f%%', bps/max*100),
+              drops > 0 and rchars('%.3f %sPPS dropped', scale(drops)) or nil)
+   end
+   local function show_pci(addr, pci, prev)
+      local bps, tag = scale(tonumber(pci.speed and pci.speed.value) or 0)
+      gridrow(rchars('| '), lchars(''))
+      gridrow(rchars('\\-'),
+              rchars('%s:', addr),
+              lchars('%d %sbE, MAC: %s', bps, tag,
+                     macaddr_string(tonumber(pci.macaddr and pci.macaddr.value) or 0)))
+      show_traffic('rx', pci, prev)
+      show_traffic('tx', pci, prev)
+   end
+   local function show_instance(label, instance, prev)
+      local engine, prev_engine = instance.engine, prev and prev.engine
+      local latency = engine and engine.latency and engine.latency.value
+      local latency_str = ''
+      if latency then 
+         local prev = prev_engine and prev_engine.latency and prev_engine.latency.value
+         latency_str = string.format('latency: %.2f min, %.2f avg, %.2f max',
+                                     summarize_histogram(latency, prev))
+      end
+      gridrow(label,
+              lchars('PID %s:', instance.pid),
+              lchars('%.2f %sbreaths/s',
+                     scale(rate('breaths', engine, prev_engine))),
+              lchars('%s', latency_str))
+      if instance.workers then
+         for pid, instance in sortedpairs(instance.workers) do
+            local prev = prev and prev.workers and prev.workers[pid]
+            gridrow(rchars('|   '), lchars(''))
+            show_instance(rchars('\\---'), instance, prev)
+         end
+      else
+         -- Note, PCI tree only shown on instances without workers.
+         for addr, pci in sortedpairs(instance.pci or {}) do
+            local prev = prev and prev.pci and prev.pci[addr]
+            show_pci(addr, pci, prev)
+         end
       end
    end
-   for k, v in sortedpairs(tree) do
-      if type(v) == 'table' then
-         local has_prev = prev and type(prev[k]) == type(v)
-         local rows = compute_display_tree(v, has_prev and prev[k], dt)
-         table.insert(ret.contents, {kind='group', label=k, contents=rows})
-      end
+   for name, instance in sortedpairs(tree) do
+      gridrow(lchars(''))
+      show_instance(lchars('%s', name), instance, prev and prev[name])
    end
-   return ret
+   return rows
+end
+
+local function compute_span(row, j, columns)
+   local span = 1
+   while j + span <= columns and row[j+1] == nil do
+      span = span + 1
+   end
+   return span
 end
 
 -- A tree is nice for data but we have so many counters that really we
 -- need to present them as a grid.  So, the next few functions try to
--- reorient "rows" display tree instances into a combination of "rows"
--- and "columns".
-local function compute_width(tree)
+-- reorient "rows" display tree instances into "grid".
+local function compute_min_width(tree)
    if tree.kind == 'group' then
-      return 2 + compute_width(tree.contents)
+      return 2 + compute_min_width(tree.contents)
    elseif tree.kind == 'rows' then
       local width = 0
       for _,tree in ipairs(tree.contents) do
-         width = math.max(width, compute_width(tree))
+         width = math.max(width, compute_min_width(tree))
       end
       return width
-   elseif tree.kind == 'columns' then
-      local width = 0
-      for _,tree in ipairs(tree.contents) do
-         width = math.max(width, compute_width(tree))
+   elseif tree.kind == 'grid' then
+      local columns, width = tree.width, 0
+      for j=1,columns do
+         local col_width = 0
+         for i=1,#tree.contents do
+            local row = tree.contents[i]
+            local tree = row[j]
+            if tree then
+               local span = compute_span(row, j, columns)
+               local item_width = compute_min_width(tree)
+               col_width = math.max(col_width, math.ceil(item_width / span))
+            end
+         end
+         width = width + col_width
       end
-      return width * tree.width
+      return width
    else
       assert(tree.kind == 'chars')
       return #tree.contents
@@ -504,10 +724,15 @@ local function compute_height(tree)
          height = height + compute_height(tree)
       end
       return height
-   elseif tree.kind == 'columns' then
+   elseif tree.kind == 'grid' then
       local height = 0
-      for _,tree in ipairs(tree.contents) do
-         height = math.max(height, compute_height(tree))
+      for i=1,#tree.contents do
+         local row_height = 0
+         for j=1,tree.width do
+            local tree = tree.contents[i][j]
+            row_height = math.max(row_height, compute_height(tree))
+         end
+         height = height + row_height
       end
       return height
    else
@@ -536,7 +761,7 @@ end
 
 local function should_make_grid(tree, indent)
    if #tree.contents <= 1 then return 1 end
-   local width = compute_width(tree) + indent
+   local width = compute_min_width(tree) + indent
    -- Maximum column width of 80.
    if width > 80 then return 1 end
    -- Minimum column width of 50.
@@ -561,14 +786,13 @@ local function create_grids(tree, indent)
          local rows = math.ceil(#tree.contents/columns)
          local contents = {}
          for i=1,rows do
-            contents[i] = {kind='columns', width=columns, contents={}}
+            contents[i] = {}
          end
          for i,tree in ipairs(tree.contents) do
             local row, col = ((i-1)%rows)+1, math.ceil(i/rows)
-            contents[row].contents[col] = tree
+            contents[row][col] = tree
          end
-         if rows == 1 then return contents[1] end
-         return {kind='rows', contents=contents}
+         return {kind='grid', width=columns, contents=contents}
       else
          local contents = {}
          for i,tree in ipairs(tree.contents) do
@@ -609,20 +833,73 @@ function render.rows(tree, row, col, width)
    end
    return row
 end
-function render.columns(tree, row, col, width)
-   local width = math.floor(width / tree.width)
-   local next_row = row
-   for i,tree in ipairs(tree.contents) do
-      next_row = math.max(next_row, render_display_tree(tree, row, col, width))
-      col = col + width
+local function allocate_column_widths(rows, cols, shrink, width)
+   local widths, expand, total = {}, 0, 0
+   for j=1,cols do
+      local col_width = 0
+      for _,row in ipairs(rows) do
+         if row[j] then
+            local span = compute_span(row, j, cols)
+            local item_width = compute_min_width(row[j])
+            col_width = math.max(col_width, math.ceil(item_width / span))
+         end
+      end
+      widths[j], total = col_width, total + col_width
+      if not shrink[j] then expand = expand + 1 end
    end
-   return next_row
+   -- Truncate from the right.
+   for j=1,cols do
+      -- Inter-column spacing before this column.
+      local spacing = j - 1
+      if total + spacing <= width then break end
+      local trim = math.min(widths[j], total + spacing - width)
+      widths[j], total = widths[j] - trim, total - trim
+   end
+   -- Allocate slack to non-shrinking columns.
+   for j=1,cols do
+      if not shrink[j] then
+         local spacing = j - 1
+         local pad = math.floor((width-total-spacing)/expand)
+         widths[j], total, expand = widths[j] + pad, total + pad, expand - 1
+      end
+   end
+   return widths
+end
+function render.grid(tree, row, col, width)
+   local widths = allocate_column_widths(
+      tree.contents, tree.width, tree.shrink or {}, width)
+   for i=1,#tree.contents do
+      local next_row = row
+      local endcol = col + width
+      local col = endcol
+      for j=tree.width,1,-1 do
+         local tree = tree.contents[i][j]
+         col = col - widths[j]
+         if tree then
+            local width = endcol - col
+            next_row = math.max(
+               next_row, render_display_tree(tree, row, col, endcol - col))
+            -- Spacing.
+            endcol = col - 1
+         end
+         -- Spacing.
+         col = col - 1
+      end
+      row = next_row
+   end
+   return row
 end
 function render.chars(tree, row, col, width)
-   move(row, col)
-   if #tree.contents > width then
-      io.write(tree.contents:sub(1,width))
+   local str = tree.contents
+   if #str > width then
+      move(row, col)
+      io.write(str:sub(1,width))
    else
+      local advance = 0
+      if tree.align=='right' then advance = width - #str
+      elseif tree.align=='center' then advance = math.floor((width - #str)/2)
+      else advance = 0 end
+      move(row, col + advance)
       io.write(tree.contents)
    end
    return row + 1
@@ -635,19 +912,34 @@ local function render_status_line()
       if ui['show_'..what] then return key..'=hide '..what end
       return key..'=show '..what
    end
-   local entries = { ui.paused and 'SPACE=unpause' or 'SPACE=pause',
-                     'q=quit',
-                     showhide('a', 'apps'), showhide('l', 'links'),
-                     showhide('e', 'engine'), showhide('0', 'empty'),
-                     showhide('r', 'rates') }
-   local instances = 0
-   for pid, _ in sortedpairs(snabb_state.instances) do
-      instances = instances + 1
+   local entries = {}
+   table.insert(entries, 'q=quit')
+   if ui.pause_time then
+      table.insert(entries, 'SPACE=unpause')
+      table.insert(entries, '[=rewind 1s')
+      table.insert(entries, ']=advance 1s')
+      table.insert(entries, '{=rewind 60s')
+      table.insert(entries, '}=advance 60s')
+   else
+      table.insert(entries, 'SPACE=pause')
    end
-   if instances > 1 then
-      if ui.focus then table.insert(entries, 'u=unfocus '..ui.focus) end
-      table.insert(entries, '<=focus prev')
-      table.insert(entries, '>=focus next')
+   if ui.view == 'interface' then
+      table.insert(entries, 't=tree view')
+   else
+      for _,e in ipairs { 'i=interface view', showhide('a', 'apps'),
+                          showhide('l', 'links'), showhide('e', 'engine'),
+                          showhide('0', 'empty'), showhide('r', 'rates') } do
+         table.insert(entries, e)
+      end
+      local instances = 0
+      for pid, _ in sortedpairs(snabb_state.instances) do
+         instances = instances + 1
+      end
+      if instances > 1 then
+         if ui.focus then table.insert(entries, 'u=unfocus '..ui.focus) end
+         table.insert(entries, '<=focus prev')
+         table.insert(entries, '>=focus next')
+      end
    end
 
    local col_width, count = 0, 0
@@ -670,7 +962,8 @@ local function refresh()
    clearterm()
    local dt
    if ui.prev_sample_time then dt = ui.sample_time - ui.prev_sample_time end
-   local tree = compute_display_tree(ui.sample, ui.prev_sample, dt)
+   local tree = compute_display_tree[ui.view](
+      ui.sample, ui.prev_sample, dt, ui.sample_time)
    tree = create_grids(tree)
    render_display_tree(tree, 1, 1, ui.cols)
    render_status_line()
@@ -686,9 +979,9 @@ local function show_ui()
          ui.tree = compute_tree() or {}
          ui.prev_sample, ui.prev_sample_time = nil, nil
       end
-      if not ui.paused then
+      if not ui.pause_time then
          ui.prev_sample_time, ui.prev_sample = ui.sample_time, ui.sample
-         ui.sample_time, ui.sample = C.get_monotonic_time(), sample_tree(ui.tree) or {}
+         ui.sample_time, ui.sample = rrd.now(), sample_tree(ui.tree) or {}
       end
       refresh()
       ui.wake:wait()
@@ -707,13 +1000,12 @@ local function refresh_display()
 end
 
 -- Here we wire up some more key bindings.
-local function toggle(tab, k)
-   return function() tab[k] = not tab[k]; needs_redisplay(true) end
+local function in_view(view, f)
+   return function() if ui.view == view then f() end end
 end
 
-local function unfocus()
-   ui.focus = nil
-   needs_redisplay(true)
+local function toggle(tab, k)
+   return function() tab[k] = not tab[k]; needs_redisplay(true) end
 end
 
 local function sortedkeys(t)
@@ -734,7 +1026,7 @@ local function focus_prev()
          end
       end
    end
-   needs_redisplay()
+   needs_redisplay(true)
 end
 
 local function focus_next()
@@ -750,25 +1042,59 @@ local function focus_next()
          end
       end
    end
-   needs_redisplay()
+   needs_redisplay(true)
 end
 
 local function unfocus()
    ui.focus = nil
-   needs_redisplay()
+   needs_redisplay(true)
 end
 
-bind_keys("0", toggle(ui, 'show_empty'))
-bind_keys("r", toggle(ui, 'show_rates'))
-bind_keys("l", toggle(ui, 'show_links'))
-bind_keys("a", toggle(ui, 'show_apps'))
-bind_keys("e", toggle(ui, 'show_engine'))
-bind_keys(" ", toggle(ui, 'paused'))
-bind_keys("u", unfocus)
-bind_keys("<", focus_prev)
-bind_keys(">", focus_next)
-bind_keys("AD", focus_prev, csi_key_bindings) -- Left and up arrow.
-bind_keys("BC", focus_next, csi_key_bindings) -- Right and down arrow.
+local function tree_view()
+   ui.view = 'tree'
+   needs_redisplay(true)
+end
+
+local function interface_view()
+   ui.view = 'interface'
+   needs_redisplay(true)
+end
+
+local function toggle_paused()
+   if ui.pause_time then
+      ui.pause_time = nil
+   else
+      ui.pause_time = ui.sample_time or rrd.now()
+   end
+   needs_redisplay(true)
+end
+
+local function rewind(secs)
+   return function()
+      if not ui.sample_time then return end -- Ensure we have a sample.
+      if not ui.pause_time then return end -- Only work when paused.
+      ui.pause_time = ui.pause_time - secs
+      needs_redisplay(true)
+   end
+end
+
+bind_keys("0", in_view('tree', toggle(ui, 'show_empty')))
+bind_keys("r", in_view('tree', toggle(ui, 'show_rates')))
+bind_keys("l", in_view('tree', toggle(ui, 'show_links')))
+bind_keys("a", in_view('tree', toggle(ui, 'show_apps')))
+bind_keys("e", in_view('tree', toggle(ui, 'show_engine')))
+bind_keys(" ", toggle_paused)
+bind_keys("u", in_view('tree', unfocus))
+bind_keys("t", in_view('interface', tree_view))
+bind_keys("i", in_view('tree', interface_view))
+bind_keys("[", rewind(1))
+bind_keys("]", rewind(-1))
+bind_keys("{", rewind(60))
+bind_keys("}", rewind(-60))
+bind_keys("<", in_view('tree', focus_prev))
+bind_keys(">", in_view('tree', focus_next))
+bind_keys("AD", global_key_bindings['<'], csi_key_bindings) -- Left and up arrow.
+bind_keys("BC", global_key_bindings['>'], csi_key_bindings) -- Right and down arrow.
 bind_keys("q\3\31\4", fiber.stop) -- C-d, C-/, q, and C-c.
 
 local function handle_input ()

@@ -12,6 +12,7 @@ local timer = require("core.timer")
 local worker = require("core.worker")
 local cltable = require("lib.cltable")
 local cpuset = require("lib.cpuset")
+local rrd = require("lib.rrd")
 local scheduling = require("lib.scheduling")
 local mem = require("lib.stream.mem")
 local socket = require("lib.stream.socket")
@@ -25,7 +26,7 @@ local state = require("lib.yang.state")
 local path_mod = require("lib.yang.path")
 local path_data = require("lib.yang.path_data")
 local action_codec = require("lib.ptree.action_codec")
-local alarm_codec = require("lib.ptree.alarm_codec")
+local ptree_alarms = require("lib.ptree.alarms")
 local support = require("lib.ptree.support")
 local channel = require("lib.ptree.channel")
 local trace = require("lib.ptree.trace")
@@ -89,6 +90,8 @@ function new_manager (conf)
    ret.worker_default_scheduling = conf.worker_default_scheduling
    ret.workers = {}
    ret.state_change_listeners = {}
+   -- name->{aggregated=counter, active=pid->counter, archived=uint64[1]}
+   ret.counters = {}
 
    if conf.rpc_trace_file then
       ret:info("Logging RPCs to %s", conf.rpc_trace_file)
@@ -174,6 +177,7 @@ function Manager:start ()
    fiber.spawn(function () self:accept_rpc_peers() end)
    fiber.spawn(function () self:accept_notification_peers() end)
    fiber.spawn(function () self:notification_poller() end)
+   fiber.spawn(function () self:sample_active_counters() end)
 end
 
 function Manager:call_with_cleanup(closeable, f, ...)
@@ -225,13 +229,13 @@ end
 function Manager:handle_notification_peer(peer)
    local q = queue.new()
    self.notification_peers[q] = true
-   function q:close()
+   function q.close()
       self.notification_peers[q] = nil
       peer:close()
    end
    self:call_with_cleanup(q, function()
       while true do
-         json.write_json_object(peer, q:get())
+         json.write_json(peer, q:get())
          peer:write_chars("\n")
          peer:flush_output()
       end
@@ -301,46 +305,90 @@ function Manager:compute_scheduling_for_worker(id, app_graph)
    return ret
 end
 
-local counters = {active={}, archived={}, aggregated={}}
+local function has_suffix(a, b) return a:sub(-#b) == b end
+local function has_prefix(a, b) return a:sub(1,#b) == b end
+local function strip_prefix(a, b)
+   assert(has_prefix(a, b))
+   return a:sub(#b+1)
+end
+local function strip_suffix(a, b)
+   assert(has_suffix(a, b))
+   return a:sub(1,-(#b+1))
+end
 
-local function is_counter (name)
-   return lib.basename(name):match("%.counter$")
+function Manager:make_rrd(counter_name)
+   local name = strip_suffix(counter_name, ".counter")..'.rrd'
+   return rrd.create_shm(name, {
+      sources={{name='value', type='counter'}},
+      -- NOTE: The default heartbeat interval is 1s, so relax
+      -- base_interval to 2s as we're only polling every 1s (and we'll
+      -- be slightly late).  Also note that these settings correspond to
+      -- about 100 KB of data for each counter.  On a box with 1000
+      -- counters, that's 100 MB, which seems reasonable for such a
+      -- facility.
+      archives={{cf='average', duration='2h', interval='2s'},
+                {cf='average', duration='24h', interval='30s'},
+                {cf='max', duration='24h', interval='30s'},
+                {cf='average', duration='7d', interval='5m'},
+                {cf='max', duration='7d', interval='5m'}},
+      base_interval='2s' })
 end
--- Creates an aggregated counter and saves worker counter in active table.
--- Active table is indexed by aggregated counter name.
-local function create_counter (worker_pid, name)
-   local k = name:gsub(worker_pid, S.getpid())
-   if not counters.aggregated[k] then
-      counters.aggregated[k] = counter.create(k)
-   end
-   if not counters.active[k] then counters.active[k] = {} end
-   if not counters.active[k][name] then
-      counters.active[k][name] = counter.open(name)
+
+local blacklisted_counters = lib.set('macaddr', 'mtu', 'promisc', 'speed', 'status', 'type')
+local function blacklisted (name)
+   return blacklisted_counters[strip_suffix(lib.basename(name), '.counter')]
+end
+
+function Manager:monitor_worker_counters(id)
+   local worker = self.workers[id]
+   if not worker then return end -- Worker was removed before monitor started.
+   local pid, cancel = worker.pid, worker.cancel:wait_operation()
+   local dir = shm.root..'/'..pid
+   local events = inotify.recursive_directory_inventory_events(dir, cancel)
+   for ev in events.get, events do
+      if has_suffix(ev.name, '.counter') then
+         local name = strip_prefix(ev.name, dir..'/')
+         local qualified_name = '/'..pid..'/'..name
+         local counters = self.counters[name]
+         if blacklisted(name) then
+            -- Pass.
+         elseif ev.kind == 'creat' then
+            if not counters then
+               counters = { aggregated=counter.create(name), active={},
+                            rrd={}, aggregated_rrd=self:make_rrd(name),
+                            archived=ffi.new('uint64_t[1]') }
+               self.counters[name] = counters
+            end
+            counters.active[pid] = counter.open(qualified_name)
+            counters.rrd[pid] = self:make_rrd(qualified_name)
+         elseif ev.kind == 'rm' then
+            local val = counter.read(assert(counters.active[pid]))
+            counters.active[pid] = nil
+            counters.rrd[pid] = nil
+            counters.archived[0] = counters.archived[0] + val
+            counter.delete(qualified_name)
+            S.unlink(strip_suffix(qualified_name, ".counter")..".rrd")
+         end
+      end
    end
 end
--- Removes a worker counter from the active table and stores its value to
--- archived. Archived table is indexed by aggregated counter name.
-local function archive_counter (name)
-   local k = name:gsub(worker_pid, S.getpid())
-   local c = assert(counters.active[k] and counters.active[k][name])
-   local val = counter.read(c)
-   counter.delete(name)
-   counters.active[k][name] = nil
-   if not counters.archived[k] then
-      counters.archived[k] = ffi.new("uint64_t[1]")
+
+function Manager:sample_active_counters()
+   while true do
+      local now = rrd.now()
+      for name, counters in pairs(self.counters) do
+         local sum = counters.archived[0]
+         for pid, active in pairs(counters.active) do
+            local v = counter.read(active)
+            counters.rrd[pid]:add({value=v}, now)
+            sum = sum + v
+         end
+         counters.aggregated_rrd:add({value=sum}, now)
+         counter.set(counters.aggregated, sum)
+      end
+      counter.commit()
+      fiber_sleep(1)
    end
-   counters.archived[k][0] = counters.archived[k][0] + val
-end
--- For all workers counter that belong to the same aggregated name, computed
--- accumulative sum.  Accumulative sum is initialized to aggregated counter
--- value if any.
-local function compute_aggregated_value (k)
-   if not counters.archived[k] then return 0 end
-   local ret = counters.archived[k][0]
-   for _,c in pairs(counters.active[k]) do
-      ret = ret + counter.read(c)
-   end
-   return ret
 end
 
 function Manager:start_worker_for_graph(id, graph)
@@ -349,41 +397,13 @@ function Manager:start_worker_for_graph(id, graph)
    self.workers[id] = { scheduling=scheduling,
                         pid=self:start_worker(scheduling),
                         queue={}, graph=graph,
-                        cancel = cond.new() }
+                        cancel=cond.new() }
    self:state_change_event('worker_starting', id)
    self:debug('Worker %s has PID %s.', id, self.workers[id].pid)
    local actions = self.support.compute_config_actions(
       app_graph.new(), self.workers[id].graph, {}, 'load')
    self:enqueue_config_actions_for_worker(id, actions)
-
-   -- Manage aggregated counters (creation and removal).
-   fiber.spawn(function ()
-      local worker = self.workers[id]
-      local dir = shm.root..'/'..worker.pid
-      local rx = inotify.recursive_directory_inventory_events(dir, worker.cancel:wait_operation())
-      for event in rx.get, rx do
-         if is_counter(event.name) then
-            local name = event.name:gsub(shm.root, '')
-            if event.kind == 'creat' then
-               create_counter(worker.pid, name)
-            elseif event.kind == 'rm' then
-               -- Move counter from active to archive.
-               archive_counter(name)
-            end
-         end
-      end
-   end)
-
-   -- Update aggregated counters.
-   fiber.spawn(function ()
-      while true do
-         for k,c in pairs(counters.aggregated) do
-            counter.set(c, compute_aggregated_value(k))
-         end
-         counter.commit()
-         fiber_sleep(1)
-      end
-   end)
+   fiber.spawn(function () self:monitor_worker_counters(id) end)
 
    return self.workers[id]
 end
@@ -746,30 +766,15 @@ function Manager:receive_alarms_from_worker (worker)
    while true do
       local buf, len = channel:peek_message()
       if not buf then break end
-      local alarm = alarm_codec.decode(buf, len)
-      self:handle_alarm(worker, alarm)
+      local name, key, args = ptree_alarms.decode(buf, len)
+      local ok, err = pcall(self.handle_alarm, self, worker, name, key, args)
+      if not ok then self:warn('failed to handle alarm op %s', name) end
       channel:discard_message(len)
    end
 end
 
-function Manager:handle_alarm (worker, alarm)
-   local fn, args = unpack(alarm)
-   if fn == 'raise_alarm' then
-      local key, args = alarm_codec.to_alarm(args)
-      alarms.raise_alarm(key, args)
-   end
-   if fn == 'clear_alarm' then
-      local key = alarm_codec.to_alarm(args)
-      alarms.clear_alarm(key)
-   end
-   if fn == 'add_to_inventory' then
-      local key, args = alarm_codec.to_alarm_type(args)
-      alarms.do_add_to_inventory(key, args)
-   end
-   if fn == 'declare_alarm' then
-      local key, args = alarm_codec.to_alarm(args)
-      alarms.do_declare_alarm(key, args)
-   end
+function Manager:handle_alarm (worker, name, key, args)
+   alarms[name](key, args)
 end
 
 function Manager:stop ()
