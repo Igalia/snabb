@@ -410,7 +410,9 @@ function Intel:new (conf)
          txbcast   = {counter},
          txdrop    = {counter},
          txerrors  = {counter},
-         rxdmapackets = {counter}
+         rxdmapackets = {counter},
+         rxcounter = {counter, self.rxcounter},
+         txcounter = {counter, self.txcounter},
       }
       self:init_queue_stats(frame)
       self.stats = shm.create_frame("pci/"..self.pciaddress, frame)

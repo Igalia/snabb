@@ -614,6 +614,18 @@ function compute_display_tree.interface(tree, prev, dt, t)
       return compute_rate(v, prev, rrd, t, dt)
    end
    local function show_traffic(tag, pci, prev)
+      local label = tag
+      if tag == 'rx' then
+         local rxcounter = pci.rxcounter and pci.rxcounter.value
+         if rxcounter then
+            tag = 'q'..tonumber(rxcounter)..'_'..tag
+         end
+      elseif tag == 'tx' then
+         local txcounter = pci.txcounter and pci.txcounter.value
+         if txcounter then
+            tag = 'q'..tonumber(txcounter)..'_'..tag
+         end
+      end
       local pps = rate(tag..'packets', pci, prev)
       local bytes = rate(tag..'bytes', pci, prev)
       local drops = rate(tag..'drop', pci, prev)
@@ -622,7 +634,7 @@ function compute_display_tree.interface(tree, prev, dt, t)
       local bps = (bytes + overhead) * 8
       local max = tonumber(pci.speed and pci.speed.value) or 0
       gridrow(nil,
-              rchars('%s:', tag:upper()),
+              rchars('%s:', label:upper()),
               lchars('%.3f %sPPS', scale(pps)),
               lchars('%.3f %sbps', scale(bps)),
               lchars('%.2f%%', bps/max*100),
