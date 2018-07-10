@@ -492,8 +492,11 @@ local function compute_rate(v, prev, rrd, t, dt)
    end
 end
 
+local function isnan (n) return n ~= n end
+
 local function scale(x)
-   x=tonumber(x)
+   if isnan(x) then return 8888, '' end
+   x = tonumber(x)
    for _,scale in ipairs {{'T', 1e12}, {'G', 1e9}, {'M', 1e6}, {'k', 1e3}} do
       local tag, base = unpack(scale)
       if x > base then return x/base, tag end
@@ -647,10 +650,10 @@ function compute_display_tree.interface(tree, prev, dt, t)
          latency_str = string.format('latency: %.2f min, %.2f avg, %.2f max',
                                      summarize_histogram(latency, prev))
       end
+      local breaths, tag = scale(rate('breaths', engine, prev_engine))
       gridrow(label,
               lchars('PID %s:', instance.pid),
-              lchars('%.2f %sbreaths/s',
-                     scale(rate('breaths', engine, prev_engine))),
+              lchars('%.2f %sbreaths/s', breaths, tag),
               lchars('%s', latency_str))
       if instance.workers then
          for pid, instance in sortedpairs(instance.workers) do
