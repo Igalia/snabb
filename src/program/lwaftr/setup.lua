@@ -636,6 +636,31 @@ local function compute_worker_configs(conf)
    return ret
 end
 
+local function collect_pci_addresses (configuration)
+   local function is_device (pciaddr)
+      if lib.is_iface(pciaddr) then return false end
+      return pci.exists(pciaddr)
+   end
+   if configuration.softwire_config == nil then return {} end
+   local pci_addresses = {}
+   local instances = configuration.softwire_config.instance
+   for pciaddr,instance in pairs(instances) do
+      if is_device(pciaddr) then
+         pci_addresses[pciaddr] = true
+      end
+      for _,queue in ipairs(instance.queue.values) do
+         for k,v in pairs(queue.external_interface) do
+            if k == 'device' and is_device(v) then
+               pci_addresses[v] = true
+            end
+         end
+      end
+   end
+   local ret = {}
+   for k,_ in pairs(pci_addresses) do table.insert(ret, k) end
+   return ret
+end
+
 function ptree_manager(f, conf, manager_opts)
    -- Claim the name if one is defined.
    local function switch_names(config)
@@ -670,6 +695,7 @@ function ptree_manager(f, conf, manager_opts)
       initial_configuration = conf,
       schema_name = 'snabb-softwire-v2',
       default_schema = 'ietf-softwire-br',
+      pci_addresses = collect_pci_addresses(conf),
       -- log_level="DEBUG"
    }
    for k, v in pairs(manager_opts or {}) do
