@@ -311,9 +311,9 @@ function load_on_a_stick(c, conf, args)
       config.app(c, 'nic', driver, {
          pciaddr = pciaddr,
          vmdq=true, -- Needed to enable MAC filtering/stamping.
-         rxq=id,
-         txq=id,
-         poolnum=0,
+         -- rxq=id,
+         -- txq=id,
+         -- poolnum=0,
          vlan=queue.external_interface.vlan_tag,
          ring_buffer_size=args.ring_buffer_size,
          rxcounter = id,
@@ -339,9 +339,9 @@ function load_on_a_stick(c, conf, args)
       config.app(c, v4_nic_name, driver, {
          pciaddr = pciaddr,
          vmdq=true, -- Needed to enable MAC filtering/stamping.
-         rxq=id,
-         txq=id,
-         poolnum=0,
+         -- rxq=id,
+         -- txq=id,
+         -- poolnum=0,
          vlan=queue.external_interface.vlan_tag,
          ring_buffer_size=args.ring_buffer_size,
          rxcounter = id,
@@ -350,9 +350,9 @@ function load_on_a_stick(c, conf, args)
       config.app(c, v6_nic_name, driver, {
          pciaddr = pciaddr,
          vmdq=true, -- Needed to enable MAC filtering/stamping.
-         rxq=id,
-         txq=id,
-         poolnum=1,
+         -- rxq=id,
+         -- txq=id,
+         -- poolnum=1,
          vlan=queue.internal_interface.vlan_tag,
          ring_buffer_size=args.ring_buffer_size,
          rxcounter = id,
