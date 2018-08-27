@@ -58,6 +58,7 @@ MPRC        0x0407C -               RC Multicast Packets Received Count
 MPTC        0x040F0 -               RC Multicast Packets Transmitted Count
 BPRC        0x04078 -               RC Broadcast Packets Received Count
 BPTC        0x040F4 -               RC Broadcast Packets Transmitted
+TPR         0x040D0 -               RC Total Packets Received
 ]]
 }
 reg['82599ES'] = {
@@ -167,7 +168,6 @@ SWSM        0x10140 -               RW Software Semaphore
 VLNCTRL     0x05088 -               RW VLAN Control Register
 ILLERRC     0x04004 -               RC Illegal Byte Error Count
 ERRBC       0x04008 -               RC Error Byte Count
-RXNFGPC     0x041B0 -               RC Good Rx Non-Filtered Packet Counter
 GORC64      0x04088 -               RC64 Good Octets Received Count 64-bit
 GOTC64      0x04090 -               RC64 Good Octets Transmitted Count 64-bit
 RUC         0x040A4 -               RC Receive Undersize Count
@@ -1060,6 +1060,7 @@ function Intel:rxmcast   () return self.r.MPRC() + self.r.BPRC() end
 function Intel:rxbcast   () return self.r.BPRC()                 end
 function Intel:txmcast   () return self.r.MPTC() + self.r.BPTC() end
 function Intel:txbcast   () return self.r.BPTC()                 end
+function Intel:rxallpackets () return self.r.TPR()               end
 
 Intel1g.driver = "Intel1g"
 Intel1g.offsets = {
@@ -1179,7 +1180,6 @@ function Intel1g:txerrors  () return self.r.LATECOL()                     end
 function Intel1g:rxdmapackets ()
    return self.r.RPTHC()
 end
-function Intel1g:rxallpackets () return 0 end
 
 function Intel1g:init_queue_stats (frame)
    local perqregs = {
@@ -1287,9 +1287,6 @@ function Intel82599:txdrop    () return 0               end
 function Intel82599:txerrors  () return 0               end
 function Intel82599:rxdmapackets ()
    return self.r.RXDGPC()
-end
-function Intel82599:rxallpackets ()
-   return self.r.TPR()
 end
 
 function Intel82599:init_queue_stats (frame)
