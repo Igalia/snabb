@@ -89,7 +89,7 @@ function new_manager (conf)
    ret.setup_fn = conf.setup_fn
    ret.period = 1/conf.Hz
    ret.worker_default_scheduling = conf.worker_default_scheduling
-   ret.worker_default_scheduling.cpu = ret.cpuset:acquire_for_pci_addresses(conf.pci_addresses or {})
+   ret.pci_addresses = conf.pci_addresses or {}
    ret.workers = {}
    ret.state_change_listeners = {}
    -- name->{aggregated=counter, active=pid->counter, archived=uint64[1]}
@@ -371,8 +371,15 @@ function Manager:sample_active_counters()
    end
 end
 
+function Manager:compute_scheduling_for_worker()
+   local ret = {}
+   for k, v in pairs(self.worker_default_scheduling) do ret[k] = v end
+   ret.cpu = self.cpuset:acquire_for_pci_addresses(self.pci_addresses)
+   return ret
+end
+
 function Manager:start_worker_for_graph(id, graph)
-   local scheduling = self.worker_default_scheduling
+   local scheduling = self:compute_scheduling_for_worker()
    self:info('Starting worker %s.', id)
    self.workers[id] = { scheduling=scheduling,
                         pid=self:start_worker(scheduling),
