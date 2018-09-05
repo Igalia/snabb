@@ -55,6 +55,10 @@ function device_info (pciaddress)
    return info
 end
 
+function exists (pciaddress)
+   return S.stat(path(pciaddress))
+end
+
 --- Return the path to the sysfs directory for `pcidev`.
 function path(pcidev) return "/sys/bus/pci/devices/"..qualified(pcidev) end
 

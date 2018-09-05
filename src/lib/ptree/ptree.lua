@@ -60,6 +60,7 @@ local manager_config_spec = {
    rpc_trace_file = {},
    cpuset = {default=cpuset.global_cpuset()},
    Hz = {default=100},
+   pci_addresses = {},
 }
 
 local function ensure_absolute(file_name)
@@ -88,6 +89,7 @@ function new_manager (conf)
    ret.setup_fn = conf.setup_fn
    ret.period = 1/conf.Hz
    ret.worker_default_scheduling = conf.worker_default_scheduling
+   ret.pci_addresses = conf.pci_addresses or {}
    ret.workers = {}
    ret.state_change_listeners = {}
    -- name->{aggregated=counter, active=pid->counter, archived=uint64[1]}
@@ -283,28 +285,6 @@ function Manager:remove_stale_workers()
    end
 end
 
-function Manager:acquire_cpu_for_worker(id, app_graph)
-   local pci_addresses = {}
-   -- Grovel through app initargs for keys named "pciaddr".  Hacky!
-   for name, init in pairs(app_graph.apps) do
-      if type(init.arg) == 'table' then
-         for k, v in pairs(init.arg) do
-            if k == 'pciaddr' and not lib.is_iface(v) then
-               table.insert(pci_addresses, v)
-            end
-         end
-      end
-   end
-   return self.cpuset:acquire_for_pci_addresses(pci_addresses)
-end
-
-function Manager:compute_scheduling_for_worker(id, app_graph)
-   local ret = {}
-   for k, v in pairs(self.worker_default_scheduling) do ret[k] = v end
-   ret.cpu = self:acquire_cpu_for_worker(id, app_graph)
-   return ret
-end
-
 local function has_suffix(a, b) return a:sub(-#b) == b end
 local function has_prefix(a, b) return a:sub(1,#b) == b end
 local function strip_prefix(a, b)
@@ -391,8 +371,15 @@ function Manager:sample_active_counters()
    end
 end
 
+function Manager:compute_scheduling_for_worker()
+   local ret = {}
+   for k, v in pairs(self.worker_default_scheduling) do ret[k] = v end
+   ret.cpu = self.cpuset:acquire_for_pci_addresses(self.pci_addresses)
+   return ret
+end
+
 function Manager:start_worker_for_graph(id, graph)
-   local scheduling = self:compute_scheduling_for_worker(id, graph)
+   local scheduling = self:compute_scheduling_for_worker()
    self:info('Starting worker %s.', id)
    self.workers[id] = { scheduling=scheduling,
                         pid=self:start_worker(scheduling),
