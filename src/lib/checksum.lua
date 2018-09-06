@@ -14,7 +14,7 @@ local band, lshift = bit.band, bit.lshift
 -- capability.
 local cpuinfo = lib.readfile("/proc/cpuinfo", "*a")
 assert(cpuinfo, "failed to read /proc/cpuinfo for hardware check")
-local have_avx2 = cpuinfo:match("avx2")
+local have_avx2 = false and cpuinfo:match("avx2")
 local have_sse2 = cpuinfo:match("sse2")
 
 if     have_avx2 then ipsum = C.cksum_avx2

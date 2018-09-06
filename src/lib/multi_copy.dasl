@@ -45,21 +45,20 @@ function gen(count, size)
       -- dst in rdi
       -- src in rsi
 
-      | vzeroall
       | push r12
       | push r13
       | push r14
       | push r15
 
-      local tail_size = size % 32
+      local tail_size = size % 16
       local tail_mask
       if tail_size ~= 0 then
          assert(tail_size % 4 == 0, '4-byte alignment required')
-         tail_mask = ffi.new("uint8_t[32]")
+         tail_mask = ffi.new("uint8_t[16]")
          for i=0,tail_size-1 do tail_mask[i]=255 end
          table.insert(anchor, tail_mask)
          | mov rax, tail_mask
-         | vmovdqu ymm15, [rax]
+         | movdqu xmm15, [rax]
       end
 
       -- Stream in data from up to 8 regions at once.
@@ -69,21 +68,21 @@ function gen(count, size)
          for i = 0, stride-1 do
             | mov Rq(8+i), [rsi + 8*i]
          end
-         while to_copy >= 32 do
-            local double_copy = to_copy >= 64 and not tail_mask
-            local inc = double_copy and 64 or 32
+         while to_copy >= 16 do
+            local double_copy = to_copy >= 32 and not tail_mask
+            local inc = double_copy and 32 or 16
             for i = 0, stride-1 do
-               | vmovdqu ymm(i), [Rq(8+i)]
-               | add Rq(8+i), 32
+               | movdqu xmm(i), [Rq(8+i)]
+               | add Rq(8+i), 16
                if double_copy then
-                  | vmovdqu ymm(8+i), [Rq(8+i)]
-                  | add Rq(8+i), 32
+                  | movdqu xmm(8+i), [Rq(8+i)]
+                  | add Rq(8+i), 16
                end
             end
             for i = 0, stride-1 do
-               | vmovdqu [rdi + i*size], ymm(i)
+               | movdqu [rdi + i*size], xmm(i)
                if double_copy then
-                  | vmovdqu [rdi + i*size+32], ymm(8+i)
+                  | movdqu [rdi + i*size+16], xmm(8+i)
                end
             end
             | add rdi, inc
@@ -92,10 +91,10 @@ function gen(count, size)
 
          if to_copy > 0 then
             for i = 0, stride-1 do
-               | vmaskmovps ymm(i), ymm15, [Rq(8+i)]
+               | vmaskmovps xmm(i), xmm15, [Rq(8+i)]
             end
             for i = 0, stride-1 do
-               | vmaskmovps [rdi + i*size], ymm15, ymm(i)
+               | vmaskmovps [rdi + i*size], xmm15, xmm(i)
             end
             | add rdi, to_copy
             to_copy = 0
@@ -108,7 +107,6 @@ function gen(count, size)
          | add rsi, stride*8
          count = count - stride
       end
-      | vzeroall
       | pop r15
       | pop r14
       | pop r13
