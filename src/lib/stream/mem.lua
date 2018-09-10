@@ -6,13 +6,20 @@ module(..., package.seeall)
 
 local stream = require('lib.stream')
 local ffi = require('ffi')
+local C = ffi.C
+
+ffi.cdef[[
+void free(void *ptr);
+void *calloc(size_t nmemb, size_t size);
+void *memcpy(void *dest, const void *src, size_t n);
+]]
 
 local Mem = {}
 local Mem_mt = {__index = Mem}
 
 INITIAL_SIZE=4096
 
-local function new_buffer(len) return ffi.new('uint8_t[?]', len) end
+local function new_buffer(len) return C.calloc(ffi.sizeof("uint8_t"), len) end
 
 local function new_mem_io(buf, len, size, growable)
    if buf == nil then
@@ -33,7 +40,7 @@ function Mem:block() end
 
 function Mem:read(buf, count)
    count = math.min(count, self.len - self.pos)
-   ffi.copy(buf, self.buf + self.pos, count)
+   C.memcpy(buf, ffi.cast("uint8_t*", self.buf) + self.pos, count)
    self.pos = self.pos + count
    return count
 end
@@ -43,7 +50,7 @@ function Mem:grow_buffer(count)
    if self.len == self.size then
       self.size = math.max(self.size * 2, 1024)
       local buf = new_buffer(self.size)
-      ffi.copy(buf, self.buf, self.len)
+      C.memcpy(buf, self.buf, self.len)
       self.buf = buf
    end
    self.len = math.min(self.size, self.len + count)
@@ -53,7 +60,7 @@ end
 function Mem:write(buf, count)
    if self.pos == self.len then self:grow_buffer(count) end
    count = math.min(count, self.len - self.pos)
-   ffi.copy(self.buf + self.pos, buf, count)
+   C.memcpy(ffi.cast("uint8_t*", self.buf) + self.pos, buf, count)
    self.pos = self.pos + count
    return count
 end
@@ -72,6 +79,7 @@ function Mem:wait_for_readable() end
 function Mem:wait_for_writable() end
 
 function Mem:close()
+   C.free(self.buf)
    self.buf, self.pos, self.len, self.size, self.growable = nil
 end
 
@@ -93,7 +101,7 @@ end
 function open_input_string(str)
    local len = #str
    local buf = new_buffer(len)
-   ffi.copy(buf, str, len)
+   C.memcpy(buf, str, len)
    local readable, writable = true, false
    local io = new_mem_io(buf, len, len, writable)
    return stream.open(io, readable, writable)
@@ -106,7 +114,12 @@ function call_with_output_string(f, ...)
    f(unpack(args))
    out:flush_output()
    -- Can take advantage of internals to read directly.
-   return ffi.string(out.io.buf, out.io.len)
+   local success, ret = pcall(ffi.string, out.io.buf, out.io.len)
+   if not success then
+      print("string length overflow: ", out.io.len)
+      main.exit(1)
+   end
+   return ret
 end
 
 function selftest()
