@@ -402,6 +402,14 @@ module snabb-softwire-v2 {
         type yang:zero-based-counter64;
         description "All valid outgoing IPv6 packets.";
       }
+      leaf next-hop-macaddr-v4 {
+        type yang:mac-address;
+        description "MAC address of next hop's external interface";
+      }
+      leaf next-hop-macaddr-v6 {
+        type yang:mac-address;
+        description "MAC address of next hop's external interface";
+      }
     }
   }
 

@@ -143,10 +143,21 @@ types['ipv6-address'] = {
    tostring = function(val) return ipv6:ntop(val) end
 }
 
+local macaddr = ffi.new('union { uint64_t u64; uint8_t bytes[6]; }')
+local function to_macaddr(num)
+   macaddr.u64 = num
+   return macaddr.bytes
+end
+
 types['mac-address'] = {
    ctype = 'uint8_t[6]',
    parse = function(str, what) return assert(ethernet:pton(str)) end,
-   tostring = function(val) return ethernet:ntop(val) end
+   tostring = function(val)
+      -- Cast to uint8_t[6] if val is not an array.
+      local success, _ = pcall(function() return val[0] end)
+      if not success then val = to_macaddr(val) end
+      return ethernet:ntop(val)
+   end
 }
 
 types['ipv4-prefix'] = {
