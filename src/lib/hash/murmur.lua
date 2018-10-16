@@ -181,7 +181,7 @@ local function selftest_hash (hash, expected, perf)
    local hashes = ffi.new("uint8_t[?]", bytes*256)
    local seed = ffi.new("uint64_t")
 
-   print("Sleftest hash "..hash:name())
+   print("Selftest hash "..hash:name())
    for i = 0, 255 do
       key[i] = i
       seed = 256-i

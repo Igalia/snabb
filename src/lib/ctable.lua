@@ -634,7 +634,7 @@ function selftest()
       for i = 1, occupancy do
          k[0] = i
          local value = ctab:lookup_ptr(k).value[0]
-         assert(value == bnot(i))
+         assert(value == bnot(i), string.format("%d ~= %d", value, bnot(i)))
       end
       ctab:selfcheck()
 
