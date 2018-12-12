@@ -364,6 +364,7 @@ function CTable:remove(key, missing_allowed)
 end
 
 function CTable:make_lookup_streamer(stride)
+   assert(stride > 0 and stride <= 262144, "stride value out of range: "..stride)
    local res = {
       all_entries = self.entries,
       stride = stride,
