@@ -378,6 +378,7 @@ end
 generate_binary_search = memoize(generate_binary_search)
 
 function CTable:make_lookup_streamer(stride)
+   assert(stride > 0 and stride <= 262144, "stride value out of range: "..stride)
    local res = {
       all_entries = self.entries,
       stride = stride,
