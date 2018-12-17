@@ -6,6 +6,10 @@ local S = require("syscall")
 local bit = require("bit")
 local binary_search = require("lib.binary_search")
 local multi_copy = require("lib.multi_copy")
+local util = require("lib.yang.util")
+
+-- TODO: Move to core/lib.lua.
+local memoize = util.memoize
 local bxor, bnot = bit.bxor, bit.bnot
 local tobit, lshift, rshift = bit.tobit, bit.lshift, bit.rshift
 local max, floor, ceil = math.max, math.floor, math.ceil
@@ -363,6 +367,16 @@ function CTable:remove(key, missing_allowed)
    return true
 end
 
+local function generate_multi_copy(stride, size)
+   return multi_copy.gen(stride, size)
+end
+generate_multi_copy = memoize(generate_multi_copy)
+
+local function generate_binary_search(entries_per_lookup, entry_type)
+   return binary_search.gen(entries_per_lookup, entry_type)
+end
+generate_binary_search = memoize(generate_binary_search)
+
 function CTable:make_lookup_streamer(stride)
    local res = {
       all_entries = self.entries,
@@ -392,8 +406,8 @@ function CTable:make_lookup_streamer(stride)
    -- Compile multi-copy and binary-search procedures that are
    -- specialized for this table and this stride.
    local entry_size = ffi.sizeof(self.entry_type)
-   res.multi_copy = multi_copy.gen(stride, res.entries_per_lookup * entry_size)
-   res.binary_search = binary_search.gen(res.entries_per_lookup, self.entry_type)
+   res.multi_copy = generate_multi_copy(stride, res.entries_per_lookup * entry_size)
+   res.binary_search = generate_binary_search(res.entries_per_lookup, self.entry_type)
 
    return setmetatable(res, { __index = LookupStreamer })
 end
