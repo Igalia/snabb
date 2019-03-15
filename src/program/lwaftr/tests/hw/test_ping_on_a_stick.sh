@@ -19,6 +19,11 @@ if [[ -z "$SNABB_PCI1" ]]; then
     exit $SKIPPED_CODE
 fi
 
+which lshw &> /dev/null
+if [[ $? == 1 ]]; then
+    exit $SKIPPED_CODE
+fi
+
 ping6=$(which ping6 2> /dev/null)
 if [[ $? == 0 ]]; then
     ping6="ping6"
