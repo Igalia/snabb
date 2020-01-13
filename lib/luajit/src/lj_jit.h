@@ -76,6 +76,8 @@
   _(\011, sizemcode,	JIT_P_sizemcode_DEFAULT) \
   /* Max. total size of all machine code areas (in KBytes). */ \
   _(\010, maxmcode,	512) \
+  /* Whether to blacklist instructions; zero or nonzero. */ \
+  _(\011, blacklist,	0) \
   /* End of list. */
 
 enum {

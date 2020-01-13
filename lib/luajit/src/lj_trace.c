@@ -395,8 +395,11 @@ static int penalty_pc(jit_State *J, GCproto *pt, BCIns *pc, TraceError e)
       val = ((uint32_t)J->penalty[i].val << 1) +
 	    LJ_PRNG_BITS(J, PENALTY_RNDBITS);
       if (val > PENALTY_MAX) {
-	blacklist_pc(pt, pc);  /* Blacklist it, if that didn't help. */
-	return 1;
+        if (J->param[JIT_P_blacklist]) {
+          blacklist_pc(pt, pc);  /* Blacklist it, if that didn't help. */
+          return 1;
+        }
+        val = PENALTY_MAX;
       }
       goto setpenalty;
     }
