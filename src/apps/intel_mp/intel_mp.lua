@@ -177,6 +177,7 @@ ROC         0x040AC -               RC Receive Oversize Count
 RJC         0x040B0 -               RC Receive Jabber Count
 GORCL       0x04088 -               RC Good Octets Received Count Low
 GOTCL       0x04090 -               RC Good Octets Transmitted Count Low
+RXNFGPC     0x041B0 -               RC Good Rx Non-Filtered Packet Counter
 ]],
    txq = [[
 DCA_TXCTRL  0x0600C +0x40*0..127    RW Tx DCA Control Register

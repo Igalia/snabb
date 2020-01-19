@@ -70,16 +70,32 @@ function LoadGen:pull ()
    end
 end
 
+local function reset_stats (s)
+   s.TXDGPC:reset()
+   s.GOTCL:reset()
+   s.RXDGPC:reset()
+   s.GORCL:reset()
+end
+
+function LoadGen:stats ()
+   local s = self.dev.s
+   local t = {
+      TXDGPC = tonumber(s.TXDGPC()),
+      GOTCL  = tonumber(s.GOTCL()),
+      RXDGPC = tonumber(s.RXDGPC()),
+      GORCL  = tonumber(s.GORCL()),
+   }
+   reset_stats(s)
+   return t
+end
+
 function LoadGen:report ()
+   local stats = self:stats()
    print(self.pciaddress,
-         "TXDGPC (TX packets)", lib.comma_value(tonumber(self.dev.s.TXDGPC())),
-         "GOTCL (TX octets)", lib.comma_value(tonumber(self.dev.s.GOTCL())))
+         "TXDGPC (TX packets)", lib.comma_value(stats.TXDGPC),
+         "GOTCL (TX octets)", lib.comma_value(stats.GOTCL))
    print(self.pciaddress,
-         "RXDGPC (RX packets)", lib.comma_value(tonumber(self.dev.s.RXDGPC())),
-         "GORCL (RX octets)", lib.comma_value(tonumber(self.dev.s.GORCL())))
-   self.dev.s.TXDGPC:reset()
-   self.dev.s.GOTCL:reset()
-   self.dev.s.RXDGPC:reset()
-   self.dev.s.GORCL:reset()
+         "RXDGPC (RX packets)", lib.comma_value(stats.RXDGPC),
+         "GORCL (RX octets)", lib.comma_value(stats.GORCL))
 end
 

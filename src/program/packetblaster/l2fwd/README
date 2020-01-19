@@ -1,0 +1,20 @@
+Usage: packetblaster l2fwd [OPTIONS] <PCAPFILE> <PCI>...
+
+  -D DURATION, --duration DURATION
+                             Run for DURATION seconds.
+                             Duration is one second if not set.
+  -h, --help
+                             Print usage information.
+
+The `l2fwd` mode of packetblaster works similarly to the `replay` mode.
+
+Packets are read from a .pcap file and get transmited continuously to a NIC.
+In contrast to the `replay` mode, the `l2fwd` mode only reports aggregated average
+statistics of total packets transmitted, packets received and packet difference.
+Additionally, the `l2fwd` mode needs to run for 15 seconds to warm up.
+
+This mode of packetblaster is aimed to be used in conjuntion with the `l2fwd`
+program. This program forwards any packet received in a port to its emissor.
+
+Examples:
+  packetblaster l2fwd myfile.cap 01:00.0
